@@ -33,3 +33,29 @@ export function exportMessagesAsTxt(messages, filename = 'chat-history.txt') {
   link.click();
   URL.revokeObjectURL(url);
 }
+
+export function writeBackupSnapshot(backupKey, messages) {
+  if (!Array.isArray(messages) || messages.length === 0) return;
+  writeStorageJSON(backupKey, {
+    savedAt: new Date().toISOString(),
+    count: messages.length,
+    messages,
+  });
+}
+
+export function readBackupSnapshot(backupKey) {
+  const data = readStorageJSON(backupKey, null);
+  if (!data || !Array.isArray(data.messages) || data.messages.length === 0) {
+    return null;
+  }
+  return data;
+}
+
+export function formatBackupFilename(prefix = 'claude-auto-backup') {
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(
+    now.getDate()
+  )}-${pad(now.getHours())}${pad(now.getMinutes())}`;
+  return `${prefix}-${stamp}.txt`;
+}
