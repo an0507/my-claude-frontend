@@ -23,11 +23,8 @@ function formatReadableDate(dateKey) {
 
 /**
  * 计算“前一天 04:00 至 今天 04:00”的日记周期：
- * - 若当前时间 >= 今天 04:00：
- *     目标日记日期 = 今天（总结的是 [今天 04:00] 往前推 24 小时？不，按你的说法：
- *     “每天凌晨四点写前一天凌晨四点至今天凌晨四点的日记”：
- *     在到达某个 `endAt`（某天 04:00）时，总结的是 `[endAt - 24h, endAt)` 这段内容，
- *     归属日期记为 `endAt` 前一天 `startAt` 所在的自然日。）
+ * 在到达某个 `endAt`（某天 04:00）时，总结的是 `[endAt - 24h, endAt)` 这段内容，
+ * 日记归属日期记为 `startAt`（前一天 04:00 所在的日期）。
  */
 function getPreviousCycleWindow(now = new Date()) {
   const todayFourAM = new Date(
@@ -40,8 +37,6 @@ function getPreviousCycleWindow(now = new Date()) {
     0
   );
 
-  // 如果现在还没到今天凌晨 4 点，最近一次已完整结束的 04:00 是“昨天 04:00”
-  // 如果现在已经过了今天凌晨 4 点，最近一次已完整结束的 04:00 是“今天 04:00”
   const endAt =
     now >= todayFourAM
       ? todayFourAM
@@ -102,8 +97,9 @@ export default function DiaryApp({ onBackHome }) {
       return;
     }
 
-    // 优先筛选 [startAt, endAt) 时间窗内的消息；若消息没有 timestamp，则兜底取最近 30 条
-    const hasTimestamps = allMessages.some((m) => typeof m?.timestamp === 'number');
+    const hasTimestamps = allMessages.some(
+      (m) => typeof m?.timestamp === 'number'
+    );
     let scopedMessages = allMessages;
 
     if (hasTimestamps) {
@@ -119,7 +115,6 @@ export default function DiaryApp({ onBackHome }) {
       if (!force) {
         return;
       }
-      // 手动点击时若该时间窗暂无消息，兜底总结最近 30 条聊天记录
       scopedMessages = allMessages.slice(-30);
     } else {
       scopedMessages = scopedMessages.slice(-40);
@@ -135,7 +130,9 @@ export default function DiaryApp({ onBackHome }) {
 
     generatingRef.current = true;
     setGenerating(true);
-    setStatusMsg(`正在撰写 ${formatReadableDate(cycle.targetDateKey)}（${cycle.windowLabel}）的日记…`);
+    setStatusMsg(
+      `正在撰写 ${formatReadableDate(cycle.targetDateKey)}（${cycle.windowLabel}）的日记…`
+    );
 
     try {
       const promptMessages = [
@@ -218,7 +215,9 @@ ${transcript}`,
       };
 
       setEntries((prev) => {
-        const filtered = prev.filter((item) => item.date !== cycle.targetDateKey);
+        const filtered = prev.filter(
+          (item) => item.date !== cycle.targetDateKey
+        );
         return [newEntry, ...filtered].sort((a, b) =>
           b.date.localeCompare(a.date)
         );
@@ -233,7 +232,6 @@ ${transcript}`,
     }
   }, []);
 
-  // 进入日记页时检查一次，之后每分钟检查一次是否到达凌晨 4 点
   useEffect(() => {
     runDiaryGeneration({ force: false });
     const timer = setInterval(() => {
