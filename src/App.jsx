@@ -9,9 +9,13 @@ function App() {
   const [loading, setLoading] = useState(false);
 
   async function sendMessage() {
-    if (!input.trim()) return;
-    const newMessages = [...messages, { role: 'user', content: input }];
-    setMessages(newMessages);
+    if (!input.trim() || loading) return;
+
+    const userMessage = { role: 'user', content: input };
+    const nextMessages = [...messages, userMessage];
+
+    // 先把用户发的消息和一条“空的助手回复”放进列表，后面流式往里填字
+    setMessages([...nextMessages, { role: 'assistant', content: '' }]);
     setInput('');
     setLoading(true);
 
@@ -19,12 +23,56 @@ function App() {
       const resp = await fetch(`${BACKEND_URL}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: newMessages }),
+        body: JSON.stringify({ messages: nextMessages }),
       });
-      const data = await resp.json();
-      setMessages([...newMessages, { role: 'assistant', content: data.reply }]);
+
+      if (!resp.ok || !resp.body) {
+        throw new Error('网络响应异常');
+      }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop() || '';
+
+        for (const part of parts) {
+          const line = part.trim();
+          if (!line.startsWith('data:')) continue;
+
+          const dataStr = line.slice(5).trim();
+          if (dataStr === '[DONE]') break;
+
+          const parsed = JSON.parse(dataStr);
+          if (parsed.error) {
+            throw new Error(parsed.error);
+          }
+
+          if (parsed.text) {
+            setMessages((prev) => {
+              const updated = [...prev];
+              const lastIndex = updated.length - 1;
+              if (lastIndex >= 0 && updated[lastIndex].role === 'assistant') {
+                updated[lastIndex] = {
+                  ...updated[lastIndex],
+                  content: updated[lastIndex].content + parsed.text,
+                };
+              }
+              return updated;
+            });
+          }
+        }
+      }
     } catch (e) {
       alert('出错了，请检查后端地址是否正确，或者稍后重试');
+      // 出错时把刚才占位的空助手消息去掉，避免页面留个空泡
+      setMessages(nextMessages);
     }
 
     setLoading(false);
@@ -58,13 +106,13 @@ function App() {
                 background: m.role === 'user' ? '#DCF8C6' : '#f1f1f1',
                 maxWidth: '80%',
                 textAlign: 'left',
+                whiteSpace: 'pre-wrap',
               }}
             >
-              {m.content}
+              {m.content || (m.role === 'assistant' && loading ? 'Claude正在输入…' : '')}
             </span>
           </div>
         ))}
-        {loading && <div style={{ color: '#999' }}>Claude正在输入…</div>}
       </div>
 
       <div style={{ display: 'flex', gap: 8 }}>
