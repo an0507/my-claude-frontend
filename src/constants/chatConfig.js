@@ -4,6 +4,11 @@ export const MODEL_OPTIONS = [
   { id: 'claude-sonnet-4-6', label: 'claude-sonnet-4-6' },
   { id: 'claude-opus-4-6', label: 'claude-opus-4-6' },
   { id: 'gemini-2.5-pro', label: 'gemini-2.5-pro' },
+  { id: 'claude-fable-5-2', label: 'Claude Fable 5.2' },
+  { id: 'claude-fable-5-1', label: 'Claude Fable 5.1' },
+  { id: 'claude-fable-5-0', label: 'Claude Fable 5.0' },
+  { id: 'claude-opus-5-5', label: 'Claude Opus 5.5' },
+  { id: 'claude-opus-5', label: 'Claude Opus 5' },
 ];
 
 export const DEFAULT_MODEL = MODEL_OPTIONS[0].id;
