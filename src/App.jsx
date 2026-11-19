@@ -2,6 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 
 const BACKEND_URL = 'https://my-claude-backend.onrender.com';
 const STORAGE_KEY = 'my_claude_chat_messages_v1';
+const MODEL_STORAGE_KEY = 'my_claude_selected_model_v1';
+
+// 你可以按自己账号可用的 Claude 模型名增减这里
+const MODEL_OPTIONS = [
+  { label: 'Sonnet 5', value: 'claude-sonnet-5' },
+  { label: 'Sonnet 4.5', value: 'claude-sonnet-4-5' },
+  { label: 'Haiku 4.5', value: 'claude-haiku-4-5' },
+];
 
 function App() {
   const [messages, setMessages] = useState(() => {
@@ -10,6 +18,13 @@ function App() {
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
+    }
+  });
+  const [selectedModel, setSelectedModel] = useState(() => {
+    try {
+      return localStorage.getItem(MODEL_STORAGE_KEY) || MODEL_OPTIONS[0].value;
+    } catch {
+      return MODEL_OPTIONS[0].value;
     }
   });
   const [input, setInput] = useState('');
@@ -23,6 +38,14 @@ function App() {
       // 忽略存储空间超限等异常
     }
   }, [messages]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(MODEL_STORAGE_KEY, selectedModel);
+    } catch {
+      // 忽略存储空间超限等异常
+    }
+  }, [selectedModel]);
 
   useEffect(() => {
     function handleStorageChange(e) {
@@ -63,7 +86,10 @@ function App() {
       const resp = await fetch(`${BACKEND_URL}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: nextMessages }),
+        body: JSON.stringify({
+          messages: nextMessages,
+          model: selectedModel,
+        }),
       });
 
       if (!resp.ok || !resp.body) {
@@ -193,7 +219,7 @@ function App() {
           style={{
             flex: 1,
             minHeight: 380,
-            maxHeight: '65dvh',
+            maxHeight: '62dvh',
             overflowY: 'auto',
             padding: '18px 16px',
             background: 'linear-gradient(180deg, #fff7fa 0%, #fce8ef 100%)',
@@ -268,49 +294,88 @@ function App() {
           <div ref={bottomRef} />
         </div>
 
-        {/* 底部输入栏 */}
+        {/* 底部输入栏 + 下方切换模型按钮 */}
         <div
           style={{
             display: 'flex',
+            flexDirection: 'column',
             gap: 10,
             padding: '12px 14px',
             borderTop: '1px solid #fce4ec',
             background: '#fff9fb',
           }}
         >
-          <input
+          <div style={{ display: 'flex', gap: 10 }}>
+            <input
+              style={{
+                flex: 1,
+                padding: '10px 14px',
+                fontSize: 15,
+                borderRadius: 12,
+                border: '1px solid #f2cedb',
+                outline: 'none',
+                background: '#ffffff',
+                color: '#2d1e24',
+              }}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
+              placeholder="输入消息…"
+            />
+            <button
+              onClick={sendMessage}
+              disabled={loading || !input.trim()}
+              style={{
+                padding: '0 18px',
+                fontSize: 14,
+                fontWeight: 600,
+                borderRadius: 12,
+                border: 'none',
+                background: loading || !input.trim() ? '#f5c6d6' : '#e57399',
+                color: '#ffffff',
+                cursor: loading || !input.trim() ? 'not-allowed' : 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {loading ? '发送中' : '发送'}
+            </button>
+          </div>
+
+          {/* 输入消息下方的模型切换按钮 */}
+          <div
             style={{
-              flex: 1,
-              padding: '10px 14px',
-              fontSize: 15,
-              borderRadius: 12,
-              border: '1px solid #f2cedb',
-              outline: 'none',
-              background: '#ffffff',
-              color: '#2d1e24',
-            }}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-            placeholder="输入消息…"
-          />
-          <button
-            onClick={sendMessage}
-            disabled={loading || !input.trim()}
-            style={{
-              padding: '0 18px',
-              fontSize: 14,
-              fontWeight: 600,
-              borderRadius: 12,
-              border: 'none',
-              background: loading || !input.trim() ? '#f5c6d6' : '#e57399',
-              color: '#ffffff',
-              cursor: loading || !input.trim() ? 'not-allowed' : 'pointer',
-              whiteSpace: 'nowrap',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              flexWrap: 'wrap',
             }}
           >
-            {loading ? '发送中' : '发送'}
-          </button>
+            <span style={{ fontSize: 12, color: '#8c6a76' }}>模型：</span>
+            {MODEL_OPTIONS.map((item) => {
+              const active = selectedModel === item.value;
+              return (
+                <button
+                  key={item.value}
+                  type="button"
+                  disabled={loading}
+                  onClick={() => setSelectedModel(item.value)}
+                  style={{
+                    padding: '4px 11px',
+                    fontSize: 12,
+                    fontWeight: active ? 600 : 400,
+                    borderRadius: 999,
+                    border: active ? '1px solid #e57399' : '1px solid #f0d2dd',
+                    background: active ? '#e57399' : '#ffffff',
+                    color: active ? '#ffffff' : '#6e4d59',
+                    cursor: loading ? 'not-allowed' : 'pointer',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  {item.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
     </div>
