@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
+  AUTO_BACKUP_CONFIG,
   BACKEND_URL,
   DEFAULT_MODEL,
   DEFAULT_RESPONSE_LENGTH,
@@ -9,7 +10,10 @@ import {
 } from './constants/chatConfig';
 import {
   exportMessagesAsTxt,
+  formatBackupFilename,
+  readBackupSnapshot,
   readStorageJSON,
+  writeBackupSnapshot,
   writeStorageJSON,
 } from './utils/storage';
 
@@ -40,6 +44,7 @@ function App() {
   const bottomRef = useRef(null);
   const modelMenuRef = useRef(null);
   const lengthMenuRef = useRef(null);
+  const lastAutoBackedCountRef = useRef(0);
 
   const currentModelObj =
     MODEL_OPTIONS.find((m) => m.id === selectedModel) || MODEL_OPTIONS[0];
@@ -48,9 +53,32 @@ function App() {
     RESPONSE_LENGTH_OPTIONS.find((item) => item.id === responseLength) ||
     RESPONSE_LENGTH_OPTIONS[1];
 
+  const backupSnapshot = readBackupSnapshot(STORAGE_KEYS.MESSAGES_BACKUP);
+
   useEffect(() => {
     writeStorageJSON(STORAGE_KEYS.MESSAGES, messages);
+    if (messages.length > 0) {
+      writeBackupSnapshot(STORAGE_KEYS.MESSAGES_BACKUP, messages);
+    }
   }, [messages]);
+
+  useEffect(() => {
+    if (loading || !AUTO_BACKUP_CONFIG.ENABLED) return;
+    const count = messages.length;
+    if (count === 0) {
+      lastAutoBackedCountRef.current = 0;
+      return;
+    }
+    const step = AUTO_BACKUP_CONFIG.EVERY_N_MESSAGES;
+    if (
+      count >= step &&
+      Math.floor(count / step) >
+        Math.floor(lastAutoBackedCountRef.current / step)
+    ) {
+      lastAutoBackedCountRef.current = count;
+      exportMessagesAsTxt(messages, formatBackupFilename());
+    }
+  }, [messages, loading]);
 
   useEffect(() => {
     writeStorageJSON(STORAGE_KEYS.SELECTED_MODEL, selectedModel);
@@ -111,6 +139,11 @@ function App() {
     } catch {
       // 忽略清理异常
     }
+  }
+
+  function restoreBackup() {
+    if (loading || !backupSnapshot?.messages?.length) return;
+    setMessages(backupSnapshot.messages);
   }
 
   function handleExportMessages() {
@@ -322,8 +355,27 @@ function App() {
                 开始一段新对话吧
               </div>
               <div style={{ fontSize: 13 }}>
-                记录会自动保存在本地，多标签页也能同步
+                记录会自动保存在本地并留有备份，多标签页也能同步
               </div>
+              {backupSnapshot && (
+                <button
+                  type="button"
+                  onClick={restoreBackup}
+                  style={{
+                    marginTop: 6,
+                    padding: '6px 14px',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    borderRadius: 999,
+                    border: '1px solid #f0cedb',
+                    background: '#ffffff',
+                    color: '#be185d',
+                    cursor: 'pointer',
+                  }}
+                >
+                  恢复上次备份（{backupSnapshot.count} 条）
+                </button>
+              )}
             </div>
           ) : (
             messages.map((m, i) => {
