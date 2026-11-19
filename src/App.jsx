@@ -70,7 +70,7 @@ function App() {
         }
       }
     } catch (e) {
-      alert('出错了，请检查后端地址是否正确，或者稍后重试');
+      alert(e.message || '出错了，请稍后重试');
       // 出错时把刚才占位的空助手消息去掉，避免页面留个空泡
       setMessages(nextMessages);
     }
