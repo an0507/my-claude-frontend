@@ -1,6 +1,8 @@
 export const BACKEND_URL = 'https://my-claude-backend.onrender.com';
+
 export const STORAGE_KEYS = {
   MESSAGES: 'my_claude_chat_messages_v1',
+  MESSAGES_BACKUP: 'my_claude_chat_messages_backup_v1',
   SELECTED_MODEL: 'my_claude_selected_model_v1',
   RESPONSE_LENGTH: 'my_claude_response_length_v1',
 };
@@ -23,3 +25,8 @@ export const RESPONSE_LENGTH_OPTIONS = [
 ];
 
 export const DEFAULT_RESPONSE_LENGTH = 'normal';
+
+export const AUTO_BACKUP_CONFIG = {
+  ENABLED: true,
+  EVERY_N_MESSAGES: 10,
+};
