@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import RecordManagerModal from './components/RecordManagerModal';
 import {
   AUTO_BACKUP_CONFIG,
   BACKEND_URL,
@@ -21,12 +22,10 @@ function App() {
   const [messages, setMessages] = useState(() =>
     readStorageJSON(STORAGE_KEYS.MESSAGES, [])
   );
-
   const [selectedModel, setSelectedModel] = useState(() => {
     const saved = readStorageJSON(STORAGE_KEYS.SELECTED_MODEL, null);
     return typeof saved === 'string' && saved ? saved : DEFAULT_MODEL;
   });
-
   const [responseLength, setResponseLength] = useState(() => {
     const saved = readStorageJSON(
       STORAGE_KEYS.RESPONSE_LENGTH,
@@ -35,9 +34,9 @@ function App() {
     const exists = RESPONSE_LENGTH_OPTIONS.some((opt) => opt.id === saved);
     return exists ? saved : DEFAULT_RESPONSE_LENGTH;
   });
-
   const [menuOpen, setMenuOpen] = useState(false);
   const [lengthMenuOpen, setLengthMenuOpen] = useState(false);
+  const [managerOpen, setManagerOpen] = useState(false);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -48,11 +47,9 @@ function App() {
 
   const currentModelObj =
     MODEL_OPTIONS.find((m) => m.id === selectedModel) || MODEL_OPTIONS[0];
-
   const currentLengthObj =
     RESPONSE_LENGTH_OPTIONS.find((item) => item.id === responseLength) ||
     RESPONSE_LENGTH_OPTIONS[1];
-
   const backupSnapshot = readBackupSnapshot(STORAGE_KEYS.MESSAGES_BACKUP);
 
   useEffect(() => {
@@ -72,8 +69,7 @@ function App() {
     const step = AUTO_BACKUP_CONFIG.EVERY_N_MESSAGES;
     if (
       count >= step &&
-      Math.floor(count / step) >
-        Math.floor(lastAutoBackedCountRef.current / step)
+      Math.floor(count / step) > Math.floor(lastAutoBackedCountRef.current / step)
     ) {
       lastAutoBackedCountRef.current = count;
       exportMessagesAsTxt(messages, formatBackupFilename());
@@ -139,6 +135,7 @@ function App() {
     } catch {
       // 忽略清理异常
     }
+    setManagerOpen(false);
   }
 
   function restoreBackup() {
@@ -209,7 +206,10 @@ function App() {
             setMessages((prev) => {
               const updated = [...prev];
               const lastIndex = updated.length - 1;
-              if (lastIndex >= 0 && updated[lastIndex].role === 'assistant') {
+              if (
+                lastIndex >= 0 &&
+                updated[lastIndex].role === 'assistant'
+              ) {
                 updated[lastIndex] = {
                   ...updated[lastIndex],
                   content: updated[lastIndex].content + parsed.text,
@@ -291,6 +291,7 @@ function App() {
               claude
             </h2>
           </div>
+
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <button
               onClick={handleExportMessages}
@@ -310,21 +311,22 @@ function App() {
               导出记录
             </button>
             <button
-              onClick={clearMessages}
-              disabled={isDisabledAction}
+              type="button"
+              onClick={() => setManagerOpen(true)}
+              disabled={loading}
               style={{
                 padding: '6px 12px',
                 fontSize: 13,
                 borderRadius: 999,
                 border: '1px solid #f3d5e0',
-                background: isDisabledAction ? '#fdf2f6' : '#fff0f5',
-                color: isDisabledAction ? '#c4a4b0' : '#be185d',
-                cursor: isDisabledAction ? 'not-allowed' : 'pointer',
+                background: loading ? '#fdf2f6' : '#fff0f5',
+                color: loading ? '#c4a4b0' : '#be185d',
+                cursor: loading ? 'not-allowed' : 'pointer',
                 transition: 'all 0.15s ease',
                 whiteSpace: 'nowrap',
               }}
             >
-              清空记录
+              记录管理
             </button>
           </div>
         </div>
@@ -355,7 +357,9 @@ function App() {
               }}
             >
               <div style={{ fontSize: 28 }}>🌸</div>
-              <div style={{ fontSize: 15, fontWeight: 500, color: '#4a2e38' }}>
+              <div
+                style={{ fontSize: 15, fontWeight: 500, color: '#4a2e38' }}
+              >
                 开始一段新对话吧
               </div>
               <div style={{ fontSize: 13 }}>
@@ -481,11 +485,9 @@ function App() {
                 fontWeight: 600,
                 borderRadius: 12,
                 border: 'none',
-                background:
-                  loading || !input.trim() ? '#f5c6d6' : '#e57399',
+                background: loading || !input.trim() ? '#f5c6d6' : '#e57399',
                 color: '#ffffff',
-                cursor:
-                  loading || !input.trim() ? 'not-allowed' : 'pointer',
+                cursor: loading || !input.trim() ? 'not-allowed' : 'pointer',
                 whiteSpace: 'nowrap',
               }}
             >
@@ -665,6 +667,14 @@ function App() {
           </div>
         </div>
       </div>
+
+      <RecordManagerModal
+        open={managerOpen}
+        disabled={loading}
+        messageCount={messages.length}
+        onClose={() => setManagerOpen(false)}
+        onConfirmClear={clearMessages}
+      />
     </div>
   );
 }
