@@ -23,7 +23,21 @@ function App() {
       // 忽略存储空间超限等异常
     }
   }, [messages]);
+  // 监听其他标签页对聊天记录的修改，实现多标签页同步
+  useEffect(() => {
+    function handleStorageChange(e) {
+      if (e.key === STORAGE_KEY) {
+        try {
+          setMessages(e.newValue ? JSON.parse(e.newValue) : []);
+        } catch {
+          // 忽略解析异常
+        }
+      }
+    }
 
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
   function clearMessages() {
     if (loading) return;
     setMessages([]);
