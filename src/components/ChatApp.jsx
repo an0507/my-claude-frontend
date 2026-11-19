@@ -39,6 +39,7 @@ export default function ChatApp({ onBackHome }) {
   const [managerOpen, setManagerOpen] = useState(false);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [backupNotice, setBackupNotice] = useState('');
 
   const bottomRef = useRef(null);
   const modelMenuRef = useRef(null);
@@ -83,6 +84,7 @@ export default function ChatApp({ onBackHome }) {
     ) {
       lastAutoBackedCountRef.current = count;
       exportMessagesAsTxt(messages, formatBackupFilename());
+      setBackupNotice(`已自动导出备份（累计 ${count} 条消息）`);
     }
   }, [messages, loading]);
 
@@ -140,6 +142,7 @@ export default function ChatApp({ onBackHome }) {
   function clearMessages() {
     if (loading || messages.length === 0) return;
     setMessages([]);
+    setBackupNotice('');
     lastAutoBackedCountRef.current = 0;
     try {
       window.localStorage.removeItem(STORAGE_KEYS.MESSAGES);
@@ -157,14 +160,21 @@ export default function ChatApp({ onBackHome }) {
   function handleExportMessages() {
     if (loading || messages.length === 0) return;
     exportMessagesAsTxt(messages);
+    setBackupNotice('已手动导出聊天记录');
   }
 
   async function sendMessage() {
     if (!input.trim() || loading) return;
     setMenuOpen(false);
     setLengthMenuOpen(false);
+    setBackupNotice('');
 
-    const userMessage = { role: 'user', content: input.trim() };
+    const nowTs = Date.now();
+    const userMessage = {
+      role: 'user',
+      content: input.trim(),
+      timestamp: nowTs,
+    };
     const nextMessages = [...messages, userMessage];
     const apiMessages = nextMessages.map(({ role, content }) => ({
       role,
@@ -173,7 +183,12 @@ export default function ChatApp({ onBackHome }) {
 
     setMessages([
       ...nextMessages,
-      { role: 'assistant', content: '', modelLabel: currentModelObj.label },
+      {
+        role: 'assistant',
+        content: '',
+        modelLabel: currentModelObj.label,
+        timestamp: nowTs,
+      },
     ]);
     setInput('');
     setLoading(true);
@@ -342,6 +357,21 @@ export default function ChatApp({ onBackHome }) {
         </div>
       </div>
 
+      {/* 自动备份状态提示 */}
+      {backupNotice && (
+        <div
+          style={{
+            padding: '6px 14px',
+            fontSize: 12,
+            color: '#9d174d',
+            background: '#fff0f5',
+            borderBottom: '1px solid #fce4ec',
+          }}
+        >
+          {backupNotice}
+        </div>
+      )}
+
       {/* 聊天消息区 */}
       <div
         style={{
@@ -367,14 +397,11 @@ export default function ChatApp({ onBackHome }) {
               gap: 8,
             }}
           >
-            <div style={{ fontSize: 28 }}>🌸</div>
-            <div
-              style={{ fontSize: 15, fontWeight: 500, color: '#4a2e38' }}
-            >
+            <div style={{ fontSize: 15, fontWeight: 500, color: '#4a2e38' }}>
               开始一段新对话吧
             </div>
             <div style={{ fontSize: 13 }}>
-              记录会自动保存在本地并留有备份，多标签页也能同步
+              每 20 轮对话会自动导出备份，本地存储也会同步保存
             </div>
             {backupSnapshot && (
               <button
