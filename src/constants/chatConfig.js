@@ -3,7 +3,6 @@ export const BACKEND_URL = 'https://my-claude-backend.onrender.com';
 export const MODEL_OPTIONS = [
   { id: 'claude-sonnet-4-6', label: 'claude-sonnet-4-6' },
   { id: 'claude-opus-4-6', label: 'claude-opus-4-6' },
-  { id: 'gemini-2.5-pro', label: 'gemini-2.5-pro' },
   { id: 'claude-fable-5-2', label: 'Claude Fable 5.2' },
   { id: 'claude-fable-5-1', label: 'Claude Fable 5.1' },
   { id: 'claude-fable-5-0', label: 'Claude Fable 5.0' },
