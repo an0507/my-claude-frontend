@@ -1,62 +1,69 @@
 import { useEffect, useRef, useState } from 'react';
-
-const BACKEND_URL = 'https://my-claude-backend.onrender.com';
-const STORAGE_KEY = 'my_claude_chat_messages_v1';
-const MODEL_STORAGE_KEY = 'my_claude_selected_model_v1';
-
-const MODEL_OPTIONS = [
-  { label: 'f5.2', fullName: 'Claude Fable 5.2', value: 'claude-fable-5-2' },
-  { label: 'o5.5', fullName: 'Claude Opus 5.5', value: 'claude-opus-5-5' },
-  { label: 'f5.1', fullName: 'Claude Fable 5.1', value: 'claude-fable-5-1' },
-  { label: 'f5', fullName: 'Claude Fable 5', value: 'claude-fable-5' },
-  { label: 'o5', fullName: 'Claude Opus 5', value: 'claude-opus-5' },
-  { label: 'o4.6', fullName: 'Claude Opus 4.6', value: 'claude-opus-4-6' },
-];
+import {
+  BACKEND_URL,
+  DEFAULT_RESPONSE_LENGTH,
+  MODEL_OPTIONS,
+  RESPONSE_LENGTH_OPTIONS,
+  STORAGE_KEYS,
+} from './constants/chatConfig';
+import {
+  exportMessagesAsTxt,
+  readStorageJSON,
+  writeStorageJSON,
+} from './utils/storage';
 
 function App() {
-  const [messages, setMessages] = useState(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [messages, setMessages] = useState(() =>
+    readStorageJSON(STORAGE_KEYS.MESSAGES, [])
+  );
+
   const [selectedModel, setSelectedModel] = useState(() => {
-    try {
-      return localStorage.getItem(MODEL_STORAGE_KEY) || MODEL_OPTIONS[0].value;
-    } catch {
-      return MODEL_OPTIONS[0].value;
-    }
+    const saved = readStorageJSON(STORAGE_KEYS.SELECTED_MODEL, null);
+    return typeof saved === 'string' && saved
+      ? saved
+      : MODEL_OPTIONS[0].value;
   });
+
+  const [responseLength, setResponseLength] = useState(() => {
+    const saved = readStorageJSON(
+      STORAGE_KEYS.RESPONSE_LENGTH,
+      DEFAULT_RESPONSE_LENGTH
+    );
+    const exists = RESPONSE_LENGTH_OPTIONS.some((opt) => opt.id === saved);
+    return exists ? saved : DEFAULT_RESPONSE_LENGTH;
+  });
+
   const [menuOpen, setMenuOpen] = useState(false);
+  const [lengthMenuOpen, setLengthMenuOpen] = useState(false);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+
   const bottomRef = useRef(null);
   const modelMenuRef = useRef(null);
+  const lengthMenuRef = useRef(null);
 
   const currentModelObj =
     MODEL_OPTIONS.find((m) => m.value === selectedModel) || MODEL_OPTIONS[0];
 
+  const currentLengthObj =
+    RESPONSE_LENGTH_OPTIONS.find((item) => item.id === responseLength) ||
+    RESPONSE_LENGTH_OPTIONS[1];
+
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
-    } catch {
-      // 忽略存储空间超限等异常
-    }
+    writeStorageJSON(STORAGE_KEYS.MESSAGES, messages);
   }, [messages]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(MODEL_STORAGE_KEY, selectedModel);
-    } catch {
-      // 忽略存储空间超限等异常
-    }
+    writeStorageJSON(STORAGE_KEYS.SELECTED_MODEL, selectedModel);
   }, [selectedModel]);
 
   useEffect(() => {
+    writeStorageJSON(STORAGE_KEYS.RESPONSE_LENGTH, responseLength);
+  }, [responseLength]);
+
+  useEffect(() => {
     function handleStorageChange(e) {
-      if (e.key === STORAGE_KEY) {
+      if (e.key === STORAGE_KEYS.MESSAGES) {
         try {
           setMessages(e.newValue ? JSON.parse(e.newValue) : []);
         } catch {
@@ -64,7 +71,6 @@ function App() {
         }
       }
     }
-
     window.addEventListener('storage', handleStorageChange);
     return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
@@ -84,53 +90,40 @@ function App() {
     return () => document.removeEventListener('pointerdown', handleOutsideClick);
   }, [menuOpen]);
 
+  useEffect(() => {
+    if (!lengthMenuOpen) return;
+    function handleOutsideClick(e) {
+      if (
+        lengthMenuRef.current &&
+        !lengthMenuRef.current.contains(e.target)
+      ) {
+        setLengthMenuOpen(false);
+      }
+    }
+    document.addEventListener('pointerdown', handleOutsideClick);
+    return () => document.removeEventListener('pointerdown', handleOutsideClick);
+  }, [lengthMenuOpen]);
+
   function clearMessages() {
     if (loading || messages.length === 0) return;
     setMessages([]);
-    localStorage.removeItem(STORAGE_KEY);
+    try {
+      window.localStorage.removeItem(STORAGE_KEYS.MESSAGES);
+    } catch {
+      // 忽略清理异常
+    }
   }
 
-  function exportMessages() {
+  function handleExportMessages() {
     if (loading || messages.length === 0) return;
-
-    const now = new Date();
-    const dateStr = now.toISOString().slice(0, 10);
-    const lines = [
-      'claude 聊天记录导出',
-      `导出时间：${now.toLocaleString()}`,
-      '====================================',
-      '',
-    ];
-
-    messages.forEach((m) => {
-      const isUser = m.role === 'user';
-      const speaker = isUser
-        ? '[我]'
-        : m.modelLabel
-          ? `[claude · ${m.modelLabel}]`
-          : '[claude]';
-      lines.push(speaker);
-      lines.push(m.content || '');
-      lines.push('');
-    });
-
-    const blob = new Blob([lines.join('\n')], {
-      type: 'text/plain;charset=utf-8',
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `claude-chat-${dateStr}.txt`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    exportMessagesAsTxt(messages);
   }
 
   async function sendMessage() {
     if (!input.trim() || loading) return;
-
     setMenuOpen(false);
+    setLengthMenuOpen(false);
+
     const userMessage = { role: 'user', content: input.trim() };
     const nextMessages = [...messages, userMessage];
 
@@ -148,6 +141,7 @@ function App() {
         body: JSON.stringify({
           messages: nextMessages,
           model: selectedModel,
+          maxTokens: currentLengthObj.maxTokens,
         }),
       });
 
@@ -162,7 +156,6 @@ function App() {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-
         buffer += decoder.decode(value, { stream: true });
         const parts = buffer.split('\n\n');
         buffer = parts.pop() || '';
@@ -170,15 +163,12 @@ function App() {
         for (const part of parts) {
           const line = part.trim();
           if (!line.startsWith('data:')) continue;
-
           const dataStr = line.slice(5).trim();
           if (dataStr === '[DONE]') break;
-
           const parsed = JSON.parse(dataStr);
           if (parsed.error) {
             throw new Error(parsed.error);
           }
-
           if (parsed.text) {
             setMessages((prev) => {
               const updated = [...prev];
@@ -254,14 +244,20 @@ function App() {
                 display: 'inline-block',
               }}
             />
-            <h2 style={{ margin: 0, fontSize: 17, fontWeight: 600, color: '#3b232c' }}>
+            <h2
+              style={{
+                margin: 0,
+                fontSize: 17,
+                fontWeight: 600,
+                color: '#3b232c',
+              }}
+            >
               claude
             </h2>
           </div>
-
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <button
-              onClick={exportMessages}
+              onClick={handleExportMessages}
               disabled={isDisabledAction}
               style={{
                 padding: '6px 12px',
@@ -277,7 +273,6 @@ function App() {
             >
               导出记录
             </button>
-
             <button
               onClick={clearMessages}
               disabled={isDisabledAction}
@@ -360,7 +355,9 @@ function App() {
                       boxShadow: isUser
                         ? '0 3px 10px rgba(219, 112, 147, 0.18)'
                         : '0 2px 6px rgba(190, 120, 145, 0.1)',
-                      border: isUser ? '1px solid #f0aac2' : '1px solid #f7e4eb',
+                      border: isUser
+                        ? '1px solid #f0aac2'
+                        : '1px solid #f7e4eb',
                     }}
                   >
                     {m.content ||
@@ -372,7 +369,6 @@ function App() {
                         ''
                       ))}
                   </div>
-
                   {!isUser && m.modelLabel && (
                     <span
                       style={{
@@ -392,7 +388,7 @@ function App() {
           <div ref={bottomRef} />
         </div>
 
-        {/* 底部输入栏 + 下方单个模型选择按钮 */}
+        {/* 底部输入栏 + 模型选择 & 回复长度 */}
         <div
           style={{
             display: 'flex',
@@ -430,9 +426,11 @@ function App() {
                 fontWeight: 600,
                 borderRadius: 12,
                 border: 'none',
-                background: loading || !input.trim() ? '#f5c6d6' : '#e57399',
+                background:
+                  loading || !input.trim() ? '#f5c6d6' : '#e57399',
                 color: '#ffffff',
-                cursor: loading || !input.trim() ? 'not-allowed' : 'pointer',
+                cursor:
+                  loading || !input.trim() ? 'not-allowed' : 'pointer',
                 whiteSpace: 'nowrap',
               }}
             >
@@ -440,81 +438,175 @@ function App() {
             </button>
           </div>
 
-          <div ref={modelMenuRef} style={{ position: 'relative', alignSelf: 'flex-start' }}>
-            {menuOpen && (
-              <div
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              flexWrap: 'wrap',
+            }}
+          >
+            {/* 模型选择按钮 */}
+            <div ref={modelMenuRef} style={{ position: 'relative' }}>
+              {menuOpen && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    bottom: 'calc(100% + 8px)',
+                    left: 0,
+                    minWidth: 190,
+                    background: '#ffffff',
+                    border: '1px solid #f0cedb',
+                    borderRadius: 14,
+                    boxShadow: '0 10px 25px rgba(219, 112, 147, 0.18)',
+                    padding: 6,
+                    zIndex: 30,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 2,
+                  }}
+                >
+                  {MODEL_OPTIONS.map((item) => {
+                    const active = selectedModel === item.value;
+                    return (
+                      <button
+                        key={item.value}
+                        type="button"
+                        onClick={() => {
+                          setSelectedModel(item.value);
+                          setMenuOpen(false);
+                        }}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          padding: '8px 12px',
+                          borderRadius: 10,
+                          border: 'none',
+                          background: active ? '#ffe8f0' : 'transparent',
+                          color: active ? '#be185d' : '#3b232c',
+                          fontWeight: active ? 600 : 400,
+                          fontSize: 13,
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                        }}
+                      >
+                        <span>{item.label}</span>
+                        <span style={{ fontSize: 11, color: '#9a7b86' }}>
+                          {active ? '✓' : ''}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => {
+                  setMenuOpen((prev) => !prev);
+                  setLengthMenuOpen(false);
+                }}
                 style={{
-                  position: 'absolute',
-                  bottom: 'calc(100% + 8px)',
-                  left: 0,
-                  minWidth: 190,
-                  background: '#ffffff',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '6px 12px',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  borderRadius: 999,
                   border: '1px solid #f0cedb',
-                  borderRadius: 14,
-                  boxShadow: '0 10px 25px rgba(219, 112, 147, 0.18)',
-                  padding: 6,
-                  zIndex: 30,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 2,
+                  background: '#ffffff',
+                  color: '#6e4d59',
+                  cursor: loading ? 'not-allowed' : 'pointer',
                 }}
               >
-                {MODEL_OPTIONS.map((item) => {
-                  const active = selectedModel === item.value;
-                  return (
-                    <button
-                      key={item.value}
-                      type="button"
-                      onClick={() => {
-                        setSelectedModel(item.value);
-                        setMenuOpen(false);
-                      }}
-                      style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        padding: '8px 12px',
-                        borderRadius: 10,
-                        border: 'none',
-                        background: active ? '#ffe8f0' : 'transparent',
-                        color: active ? '#be185d' : '#3b232c',
-                        fontWeight: active ? 600 : 400,
-                        fontSize: 13,
-                        cursor: 'pointer',
-                        textAlign: 'left',
-                      }}
-                    >
-                      <span>{item.label}</span>
-                      <span style={{ fontSize: 11, color: '#9a7b86' }}>
-                        {active ? '✓' : ''}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+                <span>模型：{currentModelObj.label}</span>
+                <span style={{ fontSize: 10 }}>{menuOpen ? '▼' : '▲'}</span>
+              </button>
+            </div>
 
-            <button
-              type="button"
-              disabled={loading}
-              onClick={() => setMenuOpen((prev) => !prev)}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                padding: '6px 12px',
-                fontSize: 12,
-                fontWeight: 600,
-                borderRadius: 999,
-                border: '1px solid #f0cedb',
-                background: '#ffffff',
-                color: '#6e4d59',
-                cursor: loading ? 'not-allowed' : 'pointer',
-              }}
-            >
-              <span>模型：{currentModelObj.label}</span>
-              <span style={{ fontSize: 10 }}>{menuOpen ? '▼' : '▲'}</span>
-            </button>
+            {/* 回复长度切换 */}
+            <div ref={lengthMenuRef} style={{ position: 'relative' }}>
+              {lengthMenuOpen && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    bottom: 'calc(100% + 8px)',
+                    left: 0,
+                    minWidth: 150,
+                    background: '#ffffff',
+                    border: '1px solid #f0cedb',
+                    borderRadius: 14,
+                    boxShadow: '0 10px 25px rgba(219, 112, 147, 0.18)',
+                    padding: 6,
+                    zIndex: 30,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 2,
+                  }}
+                >
+                  {RESPONSE_LENGTH_OPTIONS.map((item) => {
+                    const active = responseLength === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => {
+                          setResponseLength(item.id);
+                          setLengthMenuOpen(false);
+                        }}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          padding: '8px 12px',
+                          borderRadius: 10,
+                          border: 'none',
+                          background: active ? '#ffe8f0' : 'transparent',
+                          color: active ? '#be185d' : '#3b232c',
+                          fontWeight: active ? 600 : 400,
+                          fontSize: 13,
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                        }}
+                      >
+                        <span>{item.label}</span>
+                        <span style={{ fontSize: 11, color: '#9a7b86' }}>
+                          {active ? '✓' : ''}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() => {
+                  setLengthMenuOpen((prev) => !prev);
+                  setMenuOpen(false);
+                }}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '6px 12px',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  borderRadius: 999,
+                  border: '1px solid #f0cedb',
+                  background: '#ffffff',
+                  color: '#6e4d59',
+                  cursor: loading ? 'not-allowed' : 'pointer',
+                }}
+              >
+                <span>长度：{currentLengthObj.label}</span>
+                <span style={{ fontSize: 10 }}>
+                  {lengthMenuOpen ? '▼' : '▲'}
+                </span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
