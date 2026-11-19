@@ -1,32 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import ChatApp from './components/ChatApp';
 import DiaryApp from './components/DiaryApp';
 import PhoneHome from './components/PhoneHome';
 
-function getStatusTime() {
-  const now = new Date();
-  const hh = String(now.getHours()).padStart(2, '0');
-  const mm = String(now.getMinutes()).padStart(2, '0');
-  return `${hh}:${mm}`;
-}
-
 export default function App() {
   const [activeApp, setActiveApp] = useState('home');
-  const [statusTime, setStatusTime] = useState(getStatusTime);
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setStatusTime(getStatusTime());
-    }, 15000);
-    return () => clearInterval(timer);
-  }, []);
-
-  const headerTitle =
-    activeApp === 'home'
-      ? '小手机主页'
-      : activeApp === 'diary'
-      ? '克劳德日记'
-      : '私聊';
 
   return (
     <div
@@ -38,8 +16,8 @@ export default function App() {
         color: '#2d1e24',
         display: 'flex',
         justifyContent: 'center',
-        alignItems: 'flex-start',
-        padding: '16px 12px',
+        alignItems: 'center',
+        padding: '20px 12px 28px',
         boxSizing: 'border-box',
       }}
     >
@@ -56,25 +34,6 @@ export default function App() {
           overflow: 'hidden',
         }}
       >
-        {/* 手机顶部状态栏 */}
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            padding: '8px 16px',
-            fontSize: 12,
-            fontWeight: 600,
-            color: '#6e4d59',
-            background: '#fff4f8',
-            borderBottom: '1px solid #fce4ec',
-          }}
-        >
-          <span>{statusTime}</span>
-          <span>{headerTitle}</span>
-          <span>5G · 100%</span>
-        </div>
-
         {/* 当前打开的页面 */}
         {activeApp === 'home' ? (
           <PhoneHome onOpenApp={(appId) => setActiveApp(appId)} />
@@ -87,7 +46,7 @@ export default function App() {
         {/* 底部 Home 导航条 */}
         <div
           style={{
-            padding: '8px 16px 10px',
+            padding: '10px 16px 12px',
             background: '#fff9fb',
             borderTop: '1px solid #fce4ec',
             display: 'flex',
