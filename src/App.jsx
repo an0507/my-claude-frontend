@@ -73,7 +73,6 @@ function App() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
 
-  // 点击菜单外部时自动收起下拉列表
   useEffect(() => {
     if (!menuOpen) return;
     function handleOutsideClick(e) {
@@ -91,6 +90,43 @@ function App() {
     localStorage.removeItem(STORAGE_KEY);
   }
 
+  function exportMessages() {
+    if (loading || messages.length === 0) return;
+
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0, 10);
+    const lines = [
+      'claude 聊天记录导出',
+      `导出时间：${now.toLocaleString()}`,
+      '====================================',
+      '',
+    ];
+
+    messages.forEach((m) => {
+      const isUser = m.role === 'user';
+      const speaker = isUser
+        ? '[我]'
+        : m.modelLabel
+          ? `[claude · ${m.modelLabel}]`
+          : '[claude]';
+      lines.push(speaker);
+      lines.push(m.content || '');
+      lines.push('');
+    });
+
+    const blob = new Blob([lines.join('\n')], {
+      type: 'text/plain;charset=utf-8',
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `claude-chat-${dateStr}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
   async function sendMessage() {
     if (!input.trim() || loading) return;
 
@@ -98,7 +134,10 @@ function App() {
     const userMessage = { role: 'user', content: input.trim() };
     const nextMessages = [...messages, userMessage];
 
-    setMessages([...nextMessages, { role: 'assistant', content: '' }]);
+    setMessages([
+      ...nextMessages,
+      { role: 'assistant', content: '', modelLabel: currentModelObj.label },
+    ]);
     setInput('');
     setLoading(true);
 
@@ -163,6 +202,8 @@ function App() {
     setLoading(false);
   }
 
+  const isDisabledAction = loading || messages.length === 0;
+
   return (
     <div
       style={{
@@ -200,6 +241,7 @@ function App() {
             borderBottom: '1px solid #fce4ec',
             background: '#fff9fb',
             borderRadius: '20px 20px 0 0',
+            gap: 8,
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -217,22 +259,43 @@ function App() {
             </h2>
           </div>
 
-          <button
-            onClick={clearMessages}
-            disabled={loading || messages.length === 0}
-            style={{
-              padding: '6px 12px',
-              fontSize: 13,
-              borderRadius: 999,
-              border: '1px solid #f3d5e0',
-              background: loading || messages.length === 0 ? '#fdf2f6' : '#fff0f5',
-              color: loading || messages.length === 0 ? '#c4a4b0' : '#be185d',
-              cursor: loading || messages.length === 0 ? 'not-allowed' : 'pointer',
-              transition: 'all 0.15s ease',
-            }}
-          >
-            清空记录
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              onClick={exportMessages}
+              disabled={isDisabledAction}
+              style={{
+                padding: '6px 12px',
+                fontSize: 13,
+                borderRadius: 999,
+                border: '1px solid #f0cedb',
+                background: isDisabledAction ? '#fdf2f6' : '#ffffff',
+                color: isDisabledAction ? '#c4a4b0' : '#6e4d59',
+                cursor: isDisabledAction ? 'not-allowed' : 'pointer',
+                transition: 'all 0.15s ease',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              导出记录
+            </button>
+
+            <button
+              onClick={clearMessages}
+              disabled={isDisabledAction}
+              style={{
+                padding: '6px 12px',
+                fontSize: 13,
+                borderRadius: 999,
+                border: '1px solid #f3d5e0',
+                background: isDisabledAction ? '#fdf2f6' : '#fff0f5',
+                color: isDisabledAction ? '#c4a4b0' : '#be185d',
+                cursor: isDisabledAction ? 'not-allowed' : 'pointer',
+                transition: 'all 0.15s ease',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              清空记录
+            </button>
+          </div>
         </div>
 
         {/* 聊天消息区 */}
@@ -276,7 +339,8 @@ function App() {
                   key={i}
                   style={{
                     display: 'flex',
-                    justifyContent: isUser ? 'flex-end' : 'flex-start',
+                    flexDirection: 'column',
+                    alignItems: isUser ? 'flex-end' : 'flex-start',
                     marginBottom: 14,
                   }}
                 >
@@ -308,6 +372,19 @@ function App() {
                         ''
                       ))}
                   </div>
+
+                  {!isUser && m.modelLabel && (
+                    <span
+                      style={{
+                        marginTop: 4,
+                        paddingLeft: 4,
+                        fontSize: 11,
+                        color: '#9a7b86',
+                      }}
+                    >
+                      {m.modelLabel}
+                    </span>
+                  )}
                 </div>
               );
             })
@@ -363,7 +440,6 @@ function App() {
             </button>
           </div>
 
-          {/* 单个模型按钮 + 点开后手动选择 */}
           <div ref={modelMenuRef} style={{ position: 'relative', alignSelf: 'flex-start' }}>
             {menuOpen && (
               <div
