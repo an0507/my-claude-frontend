@@ -44,6 +44,7 @@ export default function ChatApp({ onBackHome }) {
   const modelMenuRef = useRef(null);
   const lengthMenuRef = useRef(null);
   const lastAutoBackedCountRef = useRef(0);
+  const initializedBackupRef = useRef(false);
 
   const currentModelObj =
     MODEL_OPTIONS.find((m) => m.id === selectedModel) || MODEL_OPTIONS[0];
@@ -60,13 +61,22 @@ export default function ChatApp({ onBackHome }) {
   }, [messages]);
 
   useEffect(() => {
-    if (loading || !AUTO_BACKUP_CONFIG.ENABLED) return;
+    if (!AUTO_BACKUP_CONFIG.ENABLED) return;
+    const step = AUTO_BACKUP_CONFIG.EVERY_N_MESSAGES;
+    if (!initializedBackupRef.current) {
+      initializedBackupRef.current = true;
+      lastAutoBackedCountRef.current =
+        Math.floor(messages.length / step) * step;
+      return;
+    }
+
+    if (loading) return;
     const count = messages.length;
     if (count === 0) {
       lastAutoBackedCountRef.current = 0;
       return;
     }
-    const step = AUTO_BACKUP_CONFIG.EVERY_N_MESSAGES;
+
     if (
       count >= step &&
       Math.floor(count / step) > Math.floor(lastAutoBackedCountRef.current / step)
@@ -130,6 +140,7 @@ export default function ChatApp({ onBackHome }) {
   function clearMessages() {
     if (loading || messages.length === 0) return;
     setMessages([]);
+    lastAutoBackedCountRef.current = 0;
     try {
       window.localStorage.removeItem(STORAGE_KEYS.MESSAGES);
     } catch {
