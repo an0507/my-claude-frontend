@@ -1,30 +1,30 @@
 export const BACKEND_URL = 'https://my-claude-backend.onrender.com';
 
-export const STORAGE_KEYS = {
-  MESSAGES: 'my_claude_chat_messages_v1',
-  MESSAGES_BACKUP: 'my_claude_chat_messages_backup_v1',
-  SELECTED_MODEL: 'my_claude_selected_model_v1',
-  RESPONSE_LENGTH: 'my_claude_response_length_v1',
-};
-
-export const DEFAULT_MODEL = 'o5.5';
-
 export const MODEL_OPTIONS = [
-  { id: 'o5.5', label: 'o5.5' },
-  { id: 'f5.1', label: 'f5.1' },
-  { id: 'f5', label: 'f5' },
-  { id: 'o5', label: 'o5' },
+  { id: 'claude-sonnet-4-6', label: 'claude-sonnet-4-6' },
+  { id: 'claude-opus-4-6', label: 'claude-opus-4-6' },
+  { id: 'gemini-2.5-pro', label: 'gemini-2.5-pro' },
 ];
+
+export const DEFAULT_MODEL = MODEL_OPTIONS[0].id;
 
 export const RESPONSE_LENGTH_OPTIONS = [
-  { id: 'short', label: '简短', maxTokens: 300 },
-  { id: 'normal', label: '正常', maxTokens: 1024 },
-  { id: 'detailed', label: '展开', maxTokens: 2500 },
+  { id: 'short', label: '简短', maxTokens: 512 },
+  { id: 'medium', label: '适中', maxTokens: 1500 },
+  { id: 'long', label: '详细', maxTokens: 4000 },
 ];
 
-export const DEFAULT_RESPONSE_LENGTH = 'normal';
+export const DEFAULT_RESPONSE_LENGTH = 'medium';
 
+export const STORAGE_KEYS = {
+  MESSAGES: 'claude_chat_messages_v1',
+  MESSAGES_BACKUP: 'claude_chat_messages_backup_v1',
+  SELECTED_MODEL: 'claude_selected_model_v1',
+  RESPONSE_LENGTH: 'claude_response_length_v1',
+};
+
+// 20 轮对话 = 40 条消息（用户 + 助手各算 1 条）；若你想每 20 条消息备份一次，改成 20 即可
 export const AUTO_BACKUP_CONFIG = {
   ENABLED: true,
-  EVERY_N_MESSAGES: 10,
+  EVERY_N_MESSAGES: 40,
 };
