@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { ChatLineIcon, DiaryLineIcon } from './LineIcons';
 
 function formatNow() {
   const now = new Date();
@@ -28,18 +29,16 @@ export default function PhoneHome({ onOpenApp }) {
     {
       id: 'chat',
       name: '私聊',
-      icon: '💬',
+      renderIcon: () => <ChatLineIcon size={26} color="#ffffff" />,
       bg: 'linear-gradient(135deg, #ff85b3 0%, #e55381 100%)',
-      badge: '在线',
       ready: true,
     },
     {
-      id: 'notes',
-      name: '随手记',
-      icon: '📝',
-      bg: 'linear-gradient(135deg, #ffd166 0%, #f4a261 100%)',
-      badge: '待加',
-      ready: false,
+      id: 'diary',
+      name: '克劳德日记',
+      renderIcon: () => <DiaryLineIcon size={26} color="#ffffff" />,
+      bg: 'linear-gradient(135deg, #f48fb1 0%, #c2185b 100%)',
+      ready: true,
     },
   ];
 
@@ -117,12 +116,10 @@ export default function PhoneHome({ onOpenApp }) {
                 alignItems: 'center',
                 gap: 7,
                 cursor: app.ready ? 'pointer' : 'default',
-                opacity: app.ready ? 1 : 0.78,
               }}
             >
               <div
                 style={{
-                  position: 'relative',
                   width: 58,
                   height: 58,
                   borderRadius: 18,
@@ -130,31 +127,15 @@ export default function PhoneHome({ onOpenApp }) {
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  fontSize: 26,
                   boxShadow: '0 8px 18px rgba(190, 24, 93, 0.16)',
                   border: '2px solid rgba(255, 255, 255, 0.85)',
                 }}
               >
-                <span>{app.icon}</span>
-                <span
-                  style={{
-                    position: 'absolute',
-                    top: -5,
-                    right: -6,
-                    fontSize: 10,
-                    fontWeight: 600,
-                    padding: '2px 5px',
-                    borderRadius: 999,
-                    background: app.ready ? '#be185d' : '#9a7b86',
-                    color: '#ffffff',
-                  }}
-                >
-                  {app.badge}
-                </span>
+                {app.renderIcon()}
               </div>
               <span
                 style={{
-                  fontSize: 13,
+                  fontSize: 12.5,
                   fontWeight: 600,
                   color: '#3b232c',
                 }}
@@ -175,7 +156,7 @@ export default function PhoneHome({ onOpenApp }) {
           paddingTop: 18,
         }}
       >
-        点击「私聊」进入对话，后续可继续添加更多小软件
+        点击应用图标进入对应功能，底部横条可随时返回桌面
       </div>
     </div>
   );
