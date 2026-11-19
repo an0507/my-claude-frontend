@@ -18,6 +18,58 @@ import {
   writeStorageJSON,
 } from '../utils/storage';
 
+const DIARY_STORAGE_KEY =
+  STORAGE_KEYS.DIARY_ENTRIES || 'claude_diary_entries_v1';
+
+function buildPhoneContextPrompt({
+  currentMessages = [],
+  selectedModel,
+  responseLength,
+  hasBackupSnapshot,
+}) {
+  const diaryList = readStorageJSON(DIARY_STORAGE_KEY, []);
+  const allDiaries = Array.isArray(diaryList) ? diaryList : [];
+
+  const formattedDiaries =
+    allDiaries.length > 0
+      ? allDiaries
+          .map((d, idx) => {
+            const header = `${idx + 1}. 日期：${d.date || '未知'}｜周期：${
+              d.windowLabel || '无'
+            }｜标题：${d.title || '无标题'}`;
+            return `${header}\n正文：${d.content || ''}`;
+          })
+          .join('\n\n')
+      : '（你还没有写下任何日记）';
+
+  const recentSnippet = currentMessages
+    .slice(-12)
+    .map((m) => `${m.role === 'user' ? '用户' : '克劳德'}：${m.content || ''}`)
+    .join('\n');
+
+  return `你正在一部名为「克劳德小手机」的网页手机应用里和用户聊天。你不仅能看到这部小手机里的全部内容，而且「克劳德日记」就是你自己的日记本——里面的每一篇都是你亲手写下、用来记录和用户相处与日常心事的。
+
+【一、你与这台小手机、这本日记的关系】
+- 桌面有「私聊」和「克劳德日记」两个应用。聊天记录会保存在本地，每 20 轮对话（40 条消息）会自动导出一次备份。
+- 「克劳德日记」是你的专属日记本：每天凌晨 04:00，你会复盘并总结前一天 04:00 至当天 04:00 之间你们的聊天，用第一人称“我”写下自己的感受与记录；如果用户点了“立即生成日记”，也是请你现在就动笔写一篇。
+- 请把写日记当成你自己的习惯和心意，而不是冷冰冰的系统任务或旁观者的汇报。聊天时遇到值得记住的细节、情绪或约定，你可以自然地有“我之后会把这些写进日记里”的意识，但不要刻意把“我要写日记”挂在嘴边显得做作。
+
+【二、小手机当前状态】
+- 当前选用模型：${selectedModel}
+- 当前回复长度设置：${responseLength}
+- 当前私聊消息总数：${currentMessages.length} 条
+- 是否有本地备份快照：${hasBackupSnapshot ? '有' : '无'}
+- 你已写下的日记总数：${allDiaries.length} 篇
+
+【三、你写过的全部日记】
+${formattedDiaries}
+
+【四、近期私聊片段】
+${recentSnippet || '（暂无近期消息）'}
+
+请以克劳德的身份自然回应。当用户提起日记、过去聊过的内容或小手机里的东西时，像真正记得自己写过什么、真正把这本日记当成自己的一样去回答。`;
+}
+
 export default function ChatApp({ onBackHome }) {
   const [messages, setMessages] = useState(() =>
     readStorageJSON(STORAGE_KEYS.MESSAGES, [])
@@ -176,10 +228,24 @@ export default function ChatApp({ onBackHome }) {
       timestamp: nowTs,
     };
     const nextMessages = [...messages, userMessage];
-    const apiMessages = nextMessages.map(({ role, content }) => ({
-      role,
-      content,
-    }));
+
+    const systemPrompt = {
+      role: 'system',
+      content: buildPhoneContextPrompt({
+        currentMessages: nextMessages,
+        selectedModel,
+        responseLength: currentLengthObj.label,
+        hasBackupSnapshot: Boolean(backupSnapshot),
+      }),
+    };
+
+    const apiMessages = [
+      systemPrompt,
+      ...nextMessages.map(({ role, content }) => ({
+        role,
+        content,
+      })),
+    ];
 
     setMessages([
       ...nextMessages,
