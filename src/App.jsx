@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   BACKEND_URL,
+  DEFAULT_MODEL,
   DEFAULT_RESPONSE_LENGTH,
   MODEL_OPTIONS,
   RESPONSE_LENGTH_OPTIONS,
@@ -19,9 +20,7 @@ function App() {
 
   const [selectedModel, setSelectedModel] = useState(() => {
     const saved = readStorageJSON(STORAGE_KEYS.SELECTED_MODEL, null);
-    return typeof saved === 'string' && saved
-      ? saved
-      : MODEL_OPTIONS[0].value;
+    return typeof saved === 'string' && saved ? saved : DEFAULT_MODEL;
   });
 
   const [responseLength, setResponseLength] = useState(() => {
@@ -43,7 +42,7 @@ function App() {
   const lengthMenuRef = useRef(null);
 
   const currentModelObj =
-    MODEL_OPTIONS.find((m) => m.value === selectedModel) || MODEL_OPTIONS[0];
+    MODEL_OPTIONS.find((m) => m.id === selectedModel) || MODEL_OPTIONS[0];
 
   const currentLengthObj =
     RESPONSE_LENGTH_OPTIONS.find((item) => item.id === responseLength) ||
@@ -467,13 +466,13 @@ function App() {
                   }}
                 >
                   {MODEL_OPTIONS.map((item) => {
-                    const active = selectedModel === item.value;
+                    const active = selectedModel === item.id;
                     return (
                       <button
-                        key={item.value}
+                        key={item.id}
                         type="button"
                         onClick={() => {
-                          setSelectedModel(item.value);
+                          setSelectedModel(item.id);
                           setMenuOpen(false);
                         }}
                         style={{
