@@ -1,3 +1,4 @@
+export const BACKEND_URL = 'https://my-claude-backend.onrender.com';
 export const STORAGE_KEYS = {
   MESSAGES: 'my_claude_chat_messages_v1',
   SELECTED_MODEL: 'my_claude_selected_model_v1',
