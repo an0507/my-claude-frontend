@@ -158,6 +158,10 @@ function App() {
 
     const userMessage = { role: 'user', content: input.trim() };
     const nextMessages = [...messages, userMessage];
+    const apiMessages = nextMessages.map(({ role, content }) => ({
+      role,
+      content,
+    }));
 
     setMessages([
       ...nextMessages,
@@ -171,7 +175,7 @@ function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: nextMessages,
+          messages: apiMessages,
           model: selectedModel,
           maxTokens: currentLengthObj.maxTokens,
         }),
