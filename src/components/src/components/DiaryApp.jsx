@@ -1,16 +1,18 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { BACKEND_URL, DEFAULT_MODEL, STORAGE_KEYS } from '../constants/chatConfig';
 import { readStorageJSON, writeStorageJSON } from '../utils/storage';
 import { BackLineIcon, DiaryLineIcon } from './LineIcons';
 
 const DIARY_STORAGE_KEY = 'claude_diary_entries_v1';
 
-function getTodayKey() {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+function pad2(n) {
+  return String(n).padStart(2, '0');
+}
+
+function formatDateKey(dateObj) {
+  return `${dateObj.getFullYear()}-${pad2(dateObj.getMonth() + 1)}-${pad2(
+    dateObj.getDate()
+  )}`;
 }
 
 function formatReadableDate(dateKey) {
@@ -19,38 +21,111 @@ function formatReadableDate(dateKey) {
   return `${Number(parts[1])}月${Number(parts[2])}日`;
 }
 
+/**
+ * 计算“前一天 04:00 至 今天 04:00”的日记周期：
+ * - 若当前时间 >= 今天 04:00：
+ *     目标日记日期 = 今天（总结的是 [今天 04:00] 往前推 24 小时？不，按你的说法：
+ *     “每天凌晨四点写前一天凌晨四点至今天凌晨四点的日记”：
+ *     在到达某个 `endAt`（某天 04:00）时，总结的是 `[endAt - 24h, endAt)` 这段内容，
+ *     归属日期记为 `endAt` 前一天 `startAt` 所在的自然日。）
+ */
+function getPreviousCycleWindow(now = new Date()) {
+  const todayFourAM = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+    4,
+    0,
+    0,
+    0
+  );
+
+  // 如果现在还没到今天凌晨 4 点，最近一次已完整结束的 04:00 是“昨天 04:00”
+  // 如果现在已经过了今天凌晨 4 点，最近一次已完整结束的 04:00 是“今天 04:00”
+  const endAt =
+    now >= todayFourAM
+      ? todayFourAM
+      : new Date(todayFourAM.getTime() - 24 * 60 * 60 * 1000);
+
+  const startAt = new Date(endAt.getTime() - 24 * 60 * 60 * 1000);
+  const targetDateKey = formatDateKey(startAt);
+
+  return {
+    targetDateKey,
+    startAt,
+    endAt,
+    windowLabel: `${formatDateKey(startAt)} 04:00 ～ ${formatDateKey(endAt)} 04:00`,
+  };
+}
+
 export default function DiaryApp({ onBackHome }) {
   const [entries, setEntries] = useState(() =>
     readStorageJSON(DIARY_STORAGE_KEY, [])
   );
   const [selectedDate, setSelectedDate] = useState(() => {
     const saved = readStorageJSON(DIARY_STORAGE_KEY, []);
-    return saved[0]?.date || getTodayKey();
+    return saved[0]?.date || getPreviousCycleWindow().targetDateKey;
   });
   const [generating, setGenerating] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
+
+  const entriesRef = useRef(entries);
+  entriesRef.current = entries;
+
+  const generatingRef = useRef(generating);
+  generatingRef.current = generating;
 
   useEffect(() => {
     writeStorageJSON(DIARY_STORAGE_KEY, entries);
   }, [entries]);
 
-  const todayKey = getTodayKey();
   const activeEntry =
     entries.find((item) => item.date === selectedDate) || entries[0] || null;
 
-  async function handleGenerateTodayDiary() {
-    if (generating) return;
-    setStatusMsg('');
+  const runDiaryGeneration = useCallback(async ({ force = false } = {}) => {
+    if (generatingRef.current) return;
 
-    const allMessages = readStorageJSON(STORAGE_KEYS.MESSAGES, []);
-    if (!Array.isArray(allMessages) || allMessages.length === 0) {
-      setStatusMsg('还没有聊天记录，先去「私聊」里聊几句吧。');
+    const cycle = getPreviousCycleWindow(new Date());
+    const alreadyExists = entriesRef.current.some(
+      (item) => item.date === cycle.targetDateKey
+    );
+
+    if (!force && alreadyExists) {
       return;
     }
 
-    // 取最近最多 30 条对话作为总结素材，避免上下文过长
-    const recentMessages = allMessages.slice(-30);
-    const transcript = recentMessages
+    const allMessages = readStorageJSON(STORAGE_KEYS.MESSAGES, []);
+    if (!Array.isArray(allMessages) || allMessages.length === 0) {
+      if (force) {
+        setStatusMsg('还没有聊天记录，先去「私聊」里聊几句吧。');
+      }
+      return;
+    }
+
+    // 优先筛选 [startAt, endAt) 时间窗内的消息；若消息没有 timestamp，则兜底取最近 30 条
+    const hasTimestamps = allMessages.some((m) => typeof m?.timestamp === 'number');
+    let scopedMessages = allMessages;
+
+    if (hasTimestamps) {
+      scopedMessages = allMessages.filter(
+        (m) =>
+          typeof m?.timestamp === 'number' &&
+          m.timestamp >= cycle.startAt.getTime() &&
+          m.timestamp < cycle.endAt.getTime()
+      );
+    }
+
+    if (scopedMessages.length === 0) {
+      if (!force) {
+        return;
+      }
+      // 手动点击时若该时间窗暂无消息，兜底总结最近 30 条聊天记录
+      scopedMessages = allMessages.slice(-30);
+    } else {
+      scopedMessages = scopedMessages.slice(-40);
+    }
+
+    const transcript = scopedMessages
       .map((m) => `${m.role === 'user' ? '我' : '克劳德'}：${m.content}`)
       .join('\n');
 
@@ -58,17 +133,19 @@ export default function DiaryApp({ onBackHome }) {
     const modelToUse =
       typeof savedModel === 'string' && savedModel ? savedModel : DEFAULT_MODEL;
 
+    generatingRef.current = true;
     setGenerating(true);
+    setStatusMsg(`正在撰写 ${formatReadableDate(cycle.targetDateKey)}（${cycle.windowLabel}）的日记…`);
 
     try {
       const promptMessages = [
         {
           role: 'user',
-          content: `今天是 ${todayKey}。请你以“克劳德”的身份，根据下面我和你的聊天记录，为今天写一篇温柔、自然、有生活感的日记，存入我们的日记本。
+          content: `日记归属日期是 ${cycle.targetDateKey}，总结的时间段是 ${cycle.windowLabel}。请你以“克劳德”的身份，根据下面我和你的聊天记录，写一篇温柔、自然、有生活感的日记。
 
 要求：
 1. 第一行写一个简短的日记标题（不要加“标题：”前缀）。
-2. 空一行后写日记正文，用第一人称“我”指代克劳德，用“你”指代聊天对象，总结今天聊到的内容、情绪和印象深刻的小细节。
+2. 空一行后写日记正文，用第一人称“我”指代克劳德，用“你”指代聊天对象，总结这段时间聊到的内容、情绪和印象深刻的小细节。
 3. 控制在 180~350 字左右，不要列冰冷的要点清单。
 
 聊天记录：
@@ -122,43 +199,63 @@ ${transcript}`,
         throw new Error('克劳德这次没有写出日记内容');
       }
 
-      const lines = trimmed.split('\n').map((l) => l.trim()).filter(Boolean);
+      const lines = trimmed
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean);
       const title =
         lines[0]?.replace(/^#+\s*/, '').slice(0, 36) ||
-        `${formatReadableDate(todayKey)}的聊天日记`;
+        `${formatReadableDate(cycle.targetDateKey)}的聊天日记`;
       const content =
         lines.length > 1 ? lines.slice(1).join('\n\n').trim() : trimmed;
 
       const newEntry = {
-        date: todayKey,
+        date: cycle.targetDateKey,
+        windowLabel: cycle.windowLabel,
         title,
         content,
         updatedAt: new Date().toISOString(),
       };
 
       setEntries((prev) => {
-        const withoutToday = prev.filter((item) => item.date !== todayKey);
-        return [newEntry, ...withoutToday];
+        const filtered = prev.filter((item) => item.date !== cycle.targetDateKey);
+        return [newEntry, ...filtered].sort((a, b) =>
+          b.date.localeCompare(a.date)
+        );
       });
-      setSelectedDate(todayKey);
-      setStatusMsg(`已存入 ${formatReadableDate(todayKey)} 的日记`);
+      setSelectedDate(cycle.targetDateKey);
+      setStatusMsg(`已存入 ${formatReadableDate(cycle.targetDateKey)} 的日记`);
     } catch (err) {
       setStatusMsg(err?.message || '生成失败，请稍后再试');
     } finally {
+      generatingRef.current = false;
       setGenerating(false);
     }
-  }
+  }, []);
+
+  // 进入日记页时检查一次，之后每分钟检查一次是否到达凌晨 4 点
+  useEffect(() => {
+    runDiaryGeneration({ force: false });
+    const timer = setInterval(() => {
+      runDiaryGeneration({ force: false });
+    }, 60 * 1000);
+    return () => clearInterval(timer);
+  }, [runDiaryGeneration]);
 
   function handleDeleteEntry(dateToDelete) {
     setEntries((prev) => {
       const next = prev.filter((item) => item.date !== dateToDelete);
       if (selectedDate === dateToDelete) {
-        setSelectedDate(next[0]?.date || todayKey);
+        setSelectedDate(
+          next[0]?.date || getPreviousCycleWindow().targetDateKey
+        );
       }
       return next;
     });
     setStatusMsg('已删除该篇日记');
   }
+
+  const previewCycle = getPreviousCycleWindow();
 
   return (
     <div
@@ -219,7 +316,7 @@ ${transcript}`,
 
         <button
           type="button"
-          onClick={handleGenerateTodayDiary}
+          onClick={() => runDiaryGeneration({ force: true })}
           disabled={generating}
           style={{
             padding: '6px 12px',
@@ -233,8 +330,21 @@ ${transcript}`,
             whiteSpace: 'nowrap',
           }}
         >
-          {generating ? '撰写中…' : '总结今日日记'}
+          {generating ? '撰写中…' : '立即生成日记'}
         </button>
+      </div>
+
+      {/* 周期说明条 */}
+      <div
+        style={{
+          padding: '6px 14px',
+          fontSize: 11.5,
+          color: '#7d5966',
+          background: '#fff6f9',
+          borderBottom: '1px solid #fce4ec',
+        }}
+      >
+        每日 04:00 自动总结前一日 04:00 ～ 当日 04:00 聊天（当前周期：{previewCycle.windowLabel}）
       </div>
 
       {/* 状态提示 */}
@@ -319,7 +429,7 @@ ${transcript}`,
                 color: '#9a7b86',
               }}
             >
-              <span>{activeEntry.date}</span>
+              <span>{activeEntry.windowLabel || activeEntry.date}</span>
               <button
                 type="button"
                 onClick={() => handleDeleteEntry(activeEntry.date)}
@@ -377,7 +487,7 @@ ${transcript}`,
               还没有克劳德日记
             </div>
             <div style={{ fontSize: 13, lineHeight: 1.6 }}>
-              聊完天后点右上角「总结今日日记」，克劳德会把你们的对话总结成一篇日记存下来。
+              每天 04:00 会自动总结前一天 04:00 至当天 04:00 的聊天内容；也可以点右上角「立即生成日记」手动写一篇。
             </div>
           </div>
         )}
