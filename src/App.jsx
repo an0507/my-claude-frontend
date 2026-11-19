@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import ChatApp from './components/ChatApp';
+import DiaryApp from './components/DiaryApp';
 import PhoneHome from './components/PhoneHome';
 
 function getStatusTime() {
@@ -19,6 +20,13 @@ export default function App() {
     }, 15000);
     return () => clearInterval(timer);
   }, []);
+
+  const headerTitle =
+    activeApp === 'home'
+      ? '小手机主页'
+      : activeApp === 'diary'
+      ? '克劳德日记'
+      : '私聊';
 
   return (
     <div
@@ -63,13 +71,15 @@ export default function App() {
           }}
         >
           <span>{statusTime}</span>
-          <span>{activeApp === 'home' ? '小手机主页' : '私聊'}</span>
+          <span>{headerTitle}</span>
           <span>5G · 100%</span>
         </div>
 
         {/* 当前打开的页面 */}
         {activeApp === 'home' ? (
           <PhoneHome onOpenApp={(appId) => setActiveApp(appId)} />
+        ) : activeApp === 'diary' ? (
+          <DiaryApp onBackHome={() => setActiveApp('home')} />
         ) : (
           <ChatApp onBackHome={() => setActiveApp('home')} />
         )}
