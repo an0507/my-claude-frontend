@@ -1,12 +1,34 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
-// 把下面这行换成你在 Render 上拿到的真实后端地址（注意末尾不要带 /）
 const BACKEND_URL = 'https://my-claude-backend.onrender.com';
+const STORAGE_KEY = 'my_claude_chat_messages_v1';
 
 function App() {
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useState(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // 每次 messages 变化时，自动保存到浏览器本地
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
+    } catch {
+      // 忽略存储空间超限等异常
+    }
+  }, [messages]);
+
+  function clearMessages() {
+    if (loading) return;
+    setMessages([]);
+    localStorage.removeItem(STORAGE_KEY);
+  }
 
   async function sendMessage() {
     if (!input.trim() || loading) return;
@@ -14,7 +36,6 @@ function App() {
     const userMessage = { role: 'user', content: input };
     const nextMessages = [...messages, userMessage];
 
-    // 先把用户发的消息和一条“空的助手回复”放进列表，后面流式往里填字
     setMessages([...nextMessages, { role: 'assistant', content: '' }]);
     setInput('');
     setLoading(true);
@@ -71,7 +92,6 @@ function App() {
       }
     } catch (e) {
       alert(e.message || '出错了，请稍后重试');
-      // 出错时把刚才占位的空助手消息去掉，避免页面留个空泡
       setMessages(nextMessages);
     }
 
@@ -80,13 +100,20 @@ function App() {
 
   return (
     <div style={{ maxWidth: 600, margin: '40px auto', fontFamily: 'sans-serif', padding: '0 16px' }}>
-      <h2>跟Claude聊天</h2>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h2 style={{ margin: 0 }}>跟Claude聊天</h2>
+        <button onClick={clearMessages} disabled={loading || messages.length === 0}>
+          清空记录
+        </button>
+      </div>
+
       <div
         style={{
           border: '1px solid #ddd',
           borderRadius: 8,
           padding: 16,
           minHeight: 300,
+          marginTop: 12,
           marginBottom: 16,
         }}
       >
