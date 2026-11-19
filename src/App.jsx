@@ -121,10 +121,10 @@ function App() {
     <div
       style={{
         minHeight: '100dvh',
-        background: 'linear-gradient(180deg, #f6f7fb 0%, #eef1f7 100%)',
+        background: 'linear-gradient(180deg, #fff5f8 0%, #fde4ec 100%)',
         fontFamily:
           '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif',
-        color: '#1f2937',
+        color: '#2d1e24',
         display: 'flex',
         justifyContent: 'center',
         padding: '16px 12px',
@@ -135,10 +135,10 @@ function App() {
         style={{
           width: '100%',
           maxWidth: 640,
-          background: '#ffffff',
+          background: 'rgba(255, 252, 253, 0.92)',
           borderRadius: 20,
-          boxShadow: '0 10px 30px rgba(15, 23, 42, 0.08)',
-          border: '1px solid rgba(15, 23, 42, 0.06)',
+          boxShadow: '0 10px 30px rgba(219, 112, 147, 0.14)',
+          border: '1px solid #fad7e3',
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
@@ -151,8 +151,8 @@ function App() {
             justifyContent: 'space-between',
             alignItems: 'center',
             padding: '14px 18px',
-            borderBottom: '1px solid #f0f2f5',
-            background: '#ffffff',
+            borderBottom: '1px solid #fce4ec',
+            background: '#fff9fb',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -161,11 +161,13 @@ function App() {
                 width: 10,
                 height: 10,
                 borderRadius: '50%',
-                background: loading ? '#f59e0b' : '#10b981',
+                background: loading ? '#f59e0b' : '#ec4899',
                 display: 'inline-block',
               }}
             />
-            <h2 style={{ margin: 0, fontSize: 17, fontWeight: 600 }}>跟Claude聊天</h2>
+            <h2 style={{ margin: 0, fontSize: 17, fontWeight: 600, color: '#3b232c' }}>
+              claude
+            </h2>
           </div>
 
           <button
@@ -175,9 +177,9 @@ function App() {
               padding: '6px 12px',
               fontSize: 13,
               borderRadius: 999,
-              border: '1px solid #e5e7eb',
-              background: loading || messages.length === 0 ? '#f9fafb' : '#fff5f5',
-              color: loading || messages.length === 0 ? '#9ca3af' : '#dc2626',
+              border: '1px solid #f3d5e0',
+              background: loading || messages.length === 0 ? '#fdf2f6' : '#fff0f5',
+              color: loading || messages.length === 0 ? '#c4a4b0' : '#be185d',
               cursor: loading || messages.length === 0 ? 'not-allowed' : 'pointer',
               transition: 'all 0.15s ease',
             }}
@@ -194,7 +196,7 @@ function App() {
             maxHeight: '65dvh',
             overflowY: 'auto',
             padding: '18px 16px',
-            background: '#fafbfd',
+            background: 'linear-gradient(180deg, #fff7fa 0%, #fce8ef 100%)',
           }}
         >
           {messages.length === 0 ? (
@@ -207,12 +209,12 @@ function App() {
                 alignItems: 'center',
                 justifyContent: 'center',
                 textAlign: 'center',
-                color: '#6b7280',
+                color: '#8c6a76',
                 gap: 8,
               }}
             >
-              <div style={{ fontSize: 28 }}>💬</div>
-              <div style={{ fontSize: 15, fontWeight: 500, color: '#374151' }}>
+              <div style={{ fontSize: 28 }}>🌸</div>
+              <div style={{ fontSize: 15, fontWeight: 500, color: '#4a2e38' }}>
                 开始一段新对话吧
               </div>
               <div style={{ fontSize: 13 }}>
@@ -237,22 +239,23 @@ function App() {
                       borderRadius: isUser
                         ? '16px 16px 4px 16px'
                         : '16px 16px 16px 4px',
-                      background: isUser ? '#2563eb' : '#f1f5f9',
-                      color: isUser ? '#ffffff' : '#111827',
+                      background: isUser ? '#f7bfd2' : '#ffffff',
+                      color: isUser ? '#3a1824' : '#261a1e',
                       maxWidth: '80%',
                       fontSize: 15,
                       lineHeight: 1.6,
                       whiteSpace: 'pre-wrap',
                       wordBreak: 'break-word',
                       boxShadow: isUser
-                        ? '0 4px 12px rgba(37, 99, 235, 0.18)'
-                        : '0 1px 3px rgba(15, 23, 42, 0.04)',
+                        ? '0 3px 10px rgba(219, 112, 147, 0.18)'
+                        : '0 2px 6px rgba(190, 120, 145, 0.1)',
+                      border: isUser ? '1px solid #f0aac2' : '1px solid #f7e4eb',
                     }}
                   >
                     {m.content ||
                       (m.role === 'assistant' && loading ? (
-                        <span style={{ color: '#6b7280', fontSize: 14 }}>
-                          Claude正在输入…
+                        <span style={{ color: '#9a7b86', fontSize: 14 }}>
+                          claude正在输入…
                         </span>
                       ) : (
                         ''
@@ -271,8 +274,8 @@ function App() {
             display: 'flex',
             gap: 10,
             padding: '12px 14px',
-            borderTop: '1px solid #f0f2f5',
-            background: '#ffffff',
+            borderTop: '1px solid #fce4ec',
+            background: '#fff9fb',
           }}
         >
           <input
@@ -281,10 +284,10 @@ function App() {
               padding: '10px 14px',
               fontSize: 15,
               borderRadius: 12,
-              border: '1px solid #d1d5db',
+              border: '1px solid #f2cedb',
               outline: 'none',
-              background: '#f9fafb',
-              color: '#111827',
+              background: '#ffffff',
+              color: '#2d1e24',
             }}
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -300,7 +303,7 @@ function App() {
               fontWeight: 600,
               borderRadius: 12,
               border: 'none',
-              background: loading || !input.trim() ? '#93c5fd' : '#2563eb',
+              background: loading || !input.trim() ? '#f5c6d6' : '#e57399',
               color: '#ffffff',
               cursor: loading || !input.trim() ? 'not-allowed' : 'pointer',
               whiteSpace: 'nowrap',
