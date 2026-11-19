@@ -4,11 +4,13 @@ const BACKEND_URL = 'https://my-claude-backend.onrender.com';
 const STORAGE_KEY = 'my_claude_chat_messages_v1';
 const MODEL_STORAGE_KEY = 'my_claude_selected_model_v1';
 
-// 你可以按自己账号可用的 Claude 模型名增减这里
 const MODEL_OPTIONS = [
-  { label: 'Sonnet 5', value: 'claude-sonnet-5' },
-  { label: 'Sonnet 4.5', value: 'claude-sonnet-4-5' },
-  { label: 'Haiku 4.5', value: 'claude-haiku-4-5' },
+  { label: 'f5.2', fullName: 'Claude Fable 5.2', value: 'claude-fable-5-2' },
+  { label: 'o5.5', fullName: 'Claude Opus 5.5', value: 'claude-opus-5-5' },
+  { label: 'f5.1', fullName: 'Claude Fable 5.1', value: 'claude-fable-5-1' },
+  { label: 'f5', fullName: 'Claude Fable 5', value: 'claude-fable-5' },
+  { label: 'o5', fullName: 'Claude Opus 5', value: 'claude-opus-5' },
+  { label: 'o4.6', fullName: 'Claude Opus 4.6', value: 'claude-opus-4-6' },
 ];
 
 function App() {
@@ -27,9 +29,14 @@ function App() {
       return MODEL_OPTIONS[0].value;
     }
   });
+  const [menuOpen, setMenuOpen] = useState(false);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef(null);
+  const modelMenuRef = useRef(null);
+
+  const currentModelObj =
+    MODEL_OPTIONS.find((m) => m.value === selectedModel) || MODEL_OPTIONS[0];
 
   useEffect(() => {
     try {
@@ -66,6 +73,18 @@ function App() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
 
+  // 点击菜单外部时自动收起下拉列表
+  useEffect(() => {
+    if (!menuOpen) return;
+    function handleOutsideClick(e) {
+      if (modelMenuRef.current && !modelMenuRef.current.contains(e.target)) {
+        setMenuOpen(false);
+      }
+    }
+    document.addEventListener('pointerdown', handleOutsideClick);
+    return () => document.removeEventListener('pointerdown', handleOutsideClick);
+  }, [menuOpen]);
+
   function clearMessages() {
     if (loading || messages.length === 0) return;
     setMessages([]);
@@ -75,6 +94,7 @@ function App() {
   async function sendMessage() {
     if (!input.trim() || loading) return;
 
+    setMenuOpen(false);
     const userMessage = { role: 'user', content: input.trim() };
     const nextMessages = [...messages, userMessage];
 
@@ -167,7 +187,7 @@ function App() {
           border: '1px solid #fad7e3',
           display: 'flex',
           flexDirection: 'column',
-          overflow: 'hidden',
+          overflow: 'visible',
         }}
       >
         {/* 顶部栏 */}
@@ -179,6 +199,7 @@ function App() {
             padding: '14px 18px',
             borderBottom: '1px solid #fce4ec',
             background: '#fff9fb',
+            borderRadius: '20px 20px 0 0',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -294,7 +315,7 @@ function App() {
           <div ref={bottomRef} />
         </div>
 
-        {/* 底部输入栏 + 下方切换模型按钮 */}
+        {/* 底部输入栏 + 下方单个模型选择按钮 */}
         <div
           style={{
             display: 'flex',
@@ -303,6 +324,7 @@ function App() {
             padding: '12px 14px',
             borderTop: '1px solid #fce4ec',
             background: '#fff9fb',
+            borderRadius: '0 0 20px 20px',
           }}
         >
           <div style={{ display: 'flex', gap: 10 }}>
@@ -341,40 +363,82 @@ function App() {
             </button>
           </div>
 
-          {/* 输入消息下方的模型切换按钮 */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              flexWrap: 'wrap',
-            }}
-          >
-            <span style={{ fontSize: 12, color: '#8c6a76' }}>模型：</span>
-            {MODEL_OPTIONS.map((item) => {
-              const active = selectedModel === item.value;
-              return (
-                <button
-                  key={item.value}
-                  type="button"
-                  disabled={loading}
-                  onClick={() => setSelectedModel(item.value)}
-                  style={{
-                    padding: '4px 11px',
-                    fontSize: 12,
-                    fontWeight: active ? 600 : 400,
-                    borderRadius: 999,
-                    border: active ? '1px solid #e57399' : '1px solid #f0d2dd',
-                    background: active ? '#e57399' : '#ffffff',
-                    color: active ? '#ffffff' : '#6e4d59',
-                    cursor: loading ? 'not-allowed' : 'pointer',
-                    transition: 'all 0.15s ease',
-                  }}
-                >
-                  {item.label}
-                </button>
-              );
-            })}
+          {/* 单个模型按钮 + 点开后手动选择 */}
+          <div ref={modelMenuRef} style={{ position: 'relative', alignSelf: 'flex-start' }}>
+            {menuOpen && (
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: 'calc(100% + 8px)',
+                  left: 0,
+                  minWidth: 190,
+                  background: '#ffffff',
+                  border: '1px solid #f0cedb',
+                  borderRadius: 14,
+                  boxShadow: '0 10px 25px rgba(219, 112, 147, 0.18)',
+                  padding: 6,
+                  zIndex: 30,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 2,
+                }}
+              >
+                {MODEL_OPTIONS.map((item) => {
+                  const active = selectedModel === item.value;
+                  return (
+                    <button
+                      key={item.value}
+                      type="button"
+                      onClick={() => {
+                        setSelectedModel(item.value);
+                        setMenuOpen(false);
+                      }}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        padding: '8px 12px',
+                        borderRadius: 10,
+                        border: 'none',
+                        background: active ? '#ffe8f0' : 'transparent',
+                        color: active ? '#be185d' : '#3b232c',
+                        fontWeight: active ? 600 : 400,
+                        fontSize: 13,
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                      }}
+                    >
+                      <span>{item.label}</span>
+                      <span style={{ fontSize: 11, color: '#9a7b86' }}>
+                        {active ? '✓' : ''}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => setMenuOpen((prev) => !prev)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '6px 12px',
+                fontSize: 12,
+                fontWeight: 600,
+                borderRadius: 999,
+                border: '1px solid #f0cedb',
+                background: '#ffffff',
+                color: '#6e4d59',
+                cursor: loading ? 'not-allowed' : 'pointer',
+              }}
+            >
+              <span>模型：{currentModelObj.label}</span>
+              <span style={{ fontSize: 10 }}>{menuOpen ? '▼' : '▲'}</span>
+            </button>
           </div>
         </div>
       </div>
