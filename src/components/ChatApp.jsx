@@ -229,23 +229,17 @@ export default function ChatApp({ onBackHome }) {
     };
     const nextMessages = [...messages, userMessage];
 
-    const systemPrompt = {
-      role: 'system',
-      content: buildPhoneContextPrompt({
-        currentMessages: nextMessages,
-        selectedModel,
-        responseLength: currentLengthObj.label,
-        hasBackupSnapshot: Boolean(backupSnapshot),
-      }),
-    };
+    const systemPromptText = buildPhoneContextPrompt({
+      currentMessages: nextMessages,
+      selectedModel,
+      responseLength: currentLengthObj.label,
+      hasBackupSnapshot: Boolean(backupSnapshot),
+    });
 
-    const apiMessages = [
-      systemPrompt,
-      ...nextMessages.map(({ role, content }) => ({
-        role,
-        content,
-      })),
-    ];
+    const apiMessages = nextMessages.map(({ role, content }) => ({
+      role,
+      content,
+    }));
 
     setMessages([
       ...nextMessages,
@@ -265,6 +259,7 @@ export default function ChatApp({ onBackHome }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: apiMessages,
+          system: systemPromptText,
           model: selectedModel,
           maxTokens: currentLengthObj.maxTokens,
         }),
