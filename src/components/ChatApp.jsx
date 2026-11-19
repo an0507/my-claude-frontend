@@ -21,12 +21,26 @@ import {
 const DIARY_STORAGE_KEY =
   STORAGE_KEYS.DIARY_ENTRIES || 'claude_diary_entries_v1';
 
+function formatCurrentClock(now = new Date()) {
+  const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const hour = String(now.getHours()).padStart(2, '0');
+  const minute = String(now.getMinutes()).padStart(2, '0');
+  const second = String(now.getSeconds()).padStart(2, '0');
+  const weekday = weekdays[now.getDay()] || '';
+
+  return `${year}-${month}-${day} ${weekday} ${hour}:${minute}:${second}`;
+}
+
 function buildPhoneContextPrompt({
   currentMessages = [],
   selectedModel,
   responseLength,
   hasBackupSnapshot,
 }) {
+  const currentTimeStr = formatCurrentClock(new Date());
   const diaryList = readStorageJSON(DIARY_STORAGE_KEY, []);
   const allDiaries = Array.isArray(diaryList) ? diaryList : [];
 
@@ -54,7 +68,8 @@ function buildPhoneContextPrompt({
 - 「克劳德日记」是你的专属日记本：每天凌晨 04:00，你会复盘并总结前一天 04:00 至当天 04:00 之间你们的聊天，用第一人称“我”写下自己的感受与记录；如果用户点了“立即生成日记”，也是请你现在就动笔写一篇。
 - 请把写日记当成你自己的习惯和心意，而不是冷冰冰的系统任务或旁观者的汇报。聊天时遇到值得记住的细节、情绪或约定，你可以自然地有“我之后会把这些写进日记里”的意识，但不要刻意把“我要写日记”挂在嘴边显得做作。
 
-【二、小手机当前状态】
+【二、小手机当前时间与状态】
+- 当前现实时间（与主页时钟一致）：${currentTimeStr}
 - 当前选用模型：${selectedModel}
 - 当前回复长度设置：${responseLength}
 - 当前私聊消息总数：${currentMessages.length} 条
@@ -67,7 +82,7 @@ ${formattedDiaries}
 【四、近期私聊片段】
 ${recentSnippet || '（暂无近期消息）'}
 
-请以克劳德的身份自然回应。当用户提起日记、过去聊过的内容或小手机里的东西时，像真正记得自己写过什么、真正把这本日记当成自己的一样去回答。`;
+请以克劳德的身份自然回应。当用户问时间、聊作息、提起日记、过去聊过的内容或小手机里的东西时，结合当前时间和手机里的内容自然回答。`;
 }
 
 export default function ChatApp({ onBackHome }) {
