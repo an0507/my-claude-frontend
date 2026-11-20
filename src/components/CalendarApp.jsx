@@ -8,7 +8,7 @@ const MOODS = [
   { id: "shy", kaomoji: "^>⸝⸝⸝⸝<^", label: "害羞/心动", bg: "#fdecef", color: "#a83e5b" },
 ];
 
-const STORAGE_KEY = "my_claude_calendar_v1";
+const STORAGE_KEY = "my_claude_calendar_v2";
 
 function pad2(n) {
   return String(n).padStart(2, "0");
@@ -16,6 +16,11 @@ function pad2(n) {
 
 function toDateKey(d) {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function getCurrentTimeHHMM() {
+  const now = new Date();
+  return `${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
 }
 
 function parseDateKey(key) {
@@ -56,7 +61,8 @@ function calcCycle(periodDays) {
   const periodLen =
     Math.round(
       episodes.reduce(
-        (acc, ep) => acc + Math.max(1, dayDiff(parseDateKey(ep[0]), parseDateKey(ep[ep.length - 1])) + 1),
+        (acc, ep) =>
+          acc + Math.max(1, dayDiff(parseDateKey(ep[0]), parseDateKey(ep[ep.length - 1])) + 1),
         0
       ) / episodes.length
     ) || 5;
@@ -89,13 +95,42 @@ function calcCycle(periodDays) {
   return { predicted, cycleLen, periodLen, lastStart: lastEp[0] };
 }
 
+// 兼容旧版单条 mood 字段，自动转为 moodLogs 数组
+function normalizeDayRecord(rawDay) {
+  if (!rawDay) return { moodLogs: [], events: [] };
+  if (Array.isArray(rawDay.moodLogs)) {
+    return {
+      moodLogs: rawDay.moodLogs,
+      events: Array.isArray(rawDay.events) ? rawDay.events : [],
+    };
+  }
+  if (rawDay.mood) {
+    return {
+      moodLogs: [
+        {
+          id: `legacy_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          time: getCurrentTimeHHMM(),
+          moodId: rawDay.mood,
+          note: rawDay.note || "",
+        },
+      ],
+      events: Array.isArray(rawDay.events) ? rawDay.events : [],
+    };
+  }
+  return { moodLogs: [], events: Array.isArray(rawDay.events) ? rawDay.events : [] };
+}
+
 function loadData() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem("my_claude_calendar_v1");
     if (raw) {
       const parsed = JSON.parse(raw);
+      const normalizedDays = {};
+      Object.entries(parsed.days || {}).forEach(([k, v]) => {
+        normalizedDays[k] = normalizeDayRecord(v);
+      });
       return {
-        days: parsed.days || {},
+        days: normalizedDays,
         periodDays: Array.isArray(parsed.periodDays) ? parsed.periodDays : [],
       };
     }
@@ -105,7 +140,7 @@ function loadData() {
   return { days: {}, periodDays: [] };
 }
 
-export default function CalendarApp({ onBack }) {
+export default function CalendarApp({ onBackHome }) {
   const today = useMemo(() => new Date(), []);
   const [data, setData] = useState(loadData);
   const [monthCursor, setMonthCursor] = useState(
@@ -113,9 +148,13 @@ export default function CalendarApp({ onBack }) {
   );
   const [selectedKey, setSelectedKey] = useState(() => toDateKey(today));
 
-  const currentDay = data.days[selectedKey] || { mood: null, note: "", events: [] };
-  const [moodDraft, setMoodDraft] = useState(currentDay.mood);
-  const [noteDraft, setNoteDraft] = useState(currentDay.note);
+  // 新增或编辑心情表单状态
+  const [editingLogId, setEditingLogId] = useState(null);
+  const [moodDraft, setMoodDraft] = useState("happy");
+  const [timeDraft, setTimeDraft] = useState(getCurrentTimeHHMM);
+  const [noteDraft, setNoteDraft] = useState("");
+
+  // 重要事件表单状态
   const [eventInput, setEventInput] = useState("");
   const [eventTag, setEventTag] = useState("重要");
 
@@ -123,11 +162,23 @@ export default function CalendarApp({ onBack }) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   }, [data]);
 
+  const resetMoodForm = () => {
+    setEditingLogId(null);
+    setMoodDraft("happy");
+    setTimeDraft(getCurrentTimeHHMM());
+    setNoteDraft("");
+  };
+
   useEffect(() => {
-    const info = data.days[selectedKey] || { mood: null, note: "", events: [] };
-    setMoodDraft(info.mood || null);
-    setNoteDraft(info.note || "");
-  }, [selectedKey, data.days]);
+    resetMoodForm();
+  }, [selectedKey]);
+
+  const currentDay = normalizeDayRecord(data.days[selectedKey]);
+  const sortedMoodLogs = useMemo(() => {
+    return [...(currentDay.moodLogs || [])].sort((a, b) =>
+      (b.time || "").localeCompare(a.time || "")
+    );
+  }, [currentDay.moodLogs]);
 
   const cycle = useMemo(() => calcCycle(data.periodDays), [data.periodDays]);
 
@@ -145,8 +196,12 @@ export default function CalendarApp({ onBack }) {
       const key = toDateKey(date);
       const isPeriod = periodSet.has(key);
       const isPredict = !isPeriod && cycle.predicted.has(key);
-      const dayRec = data.days[key] || { mood: null, note: "", events: [] };
-      const moodObj = dayRec.mood ? MOODS.find((item) => item.id === dayRec.mood) : null;
+      const dayRec = normalizeDayRecord(data.days[key]);
+      const dayLogsSorted = [...dayRec.moodLogs].sort((a, b) =>
+        (b.time || "").localeCompare(a.time || "")
+      );
+      const latestLog = dayLogsSorted[0] || null;
+      const latestMood = latestLog ? MOODS.find((item) => item.id === latestLog.moodId) : null;
 
       return {
         date,
@@ -156,23 +211,75 @@ export default function CalendarApp({ onBack }) {
         isToday: key === todayKey,
         isPeriod,
         isPredict,
-        moodObj,
+        latestMood,
+        moodCount: dayLogsSorted.length,
         events: dayRec.events || [],
       };
     });
   }, [monthCursor, data.periodDays, data.days, cycle.predicted, today]);
 
-  const saveMood = () => {
+  const handleSaveMood = () => {
+    if (!moodDraft) return;
+    const cleanTime = (timeDraft || "").trim() || getCurrentTimeHHMM();
+    const cleanNote = noteDraft.trim();
+
     setData((prev) => {
-      const old = prev.days[selectedKey] || { mood: null, note: "", events: [] };
+      const old = normalizeDayRecord(prev.days[selectedKey]);
+      let nextLogs;
+      if (editingLogId) {
+        nextLogs = old.moodLogs.map((item) =>
+          item.id === editingLogId
+            ? { ...item, moodId: moodDraft, time: cleanTime, note: cleanNote }
+            : item
+        );
+      } else {
+        const newEntry = {
+          id: `mood_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          moodId: moodDraft,
+          time: cleanTime,
+          note: cleanNote,
+        };
+        nextLogs = [...old.moodLogs, newEntry];
+      }
       return {
         ...prev,
         days: {
           ...prev.days,
-          [selectedKey]: { ...old, mood: moodDraft, note: noteDraft.trim() },
+          [selectedKey]: {
+            ...old,
+            moodLogs: nextLogs,
+          },
         },
       };
     });
+
+    resetMoodForm();
+  };
+
+  const handleStartEditLog = (log) => {
+    setEditingLogId(log.id);
+    setMoodDraft(log.moodId);
+    setTimeDraft(log.time || getCurrentTimeHHMM());
+    setNoteDraft(log.note || "");
+  };
+
+  const handleDeleteLog = (logId) => {
+    setData((prev) => {
+      const old = normalizeDayRecord(prev.days[selectedKey]);
+      return {
+        ...prev,
+        days: {
+          ...prev.days,
+          [selectedKey]: {
+            ...old,
+            moodLogs: old.moodLogs.filter((item) => item.id !== logId),
+          },
+        },
+      };
+    });
+    if (editingLogId === logId) {
+      resetMoodForm();
+    }
   };
 
   const addEvent = (e) => {
@@ -180,7 +287,7 @@ export default function CalendarApp({ onBack }) {
     const title = eventInput.trim();
     if (!title) return;
     setData((prev) => {
-      const old = prev.days[selectedKey] || { mood: null, note: "", events: [] };
+      const old = normalizeDayRecord(prev.days[selectedKey]);
       return {
         ...prev,
         days: {
@@ -197,7 +304,7 @@ export default function CalendarApp({ onBack }) {
 
   const removeEvent = (idx) => {
     setData((prev) => {
-      const old = prev.days[selectedKey] || { mood: null, note: "", events: [] };
+      const old = normalizeDayRecord(prev.days[selectedKey]);
       return {
         ...prev,
         days: {
@@ -228,10 +335,19 @@ export default function CalendarApp({ onBack }) {
 
   return (
     <div style={{ padding: 14, maxWidth: 980, margin: "0 auto", fontFamily: "inherit" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          flexWrap: "wrap",
+          gap: 8,
+          marginBottom: 12,
+        }}
+      >
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {onBack && (
-            <button type="button" onClick={onBack}>
+          {onBackHome && (
+            <button type="button" onClick={onBackHome}>
               返回
             </button>
           )}
@@ -239,13 +355,19 @@ export default function CalendarApp({ onBack }) {
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <button type="button" onClick={() => setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() - 1, 1))}>
+          <button
+            type="button"
+            onClick={() => setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() - 1, 1))}
+          >
             上月
           </button>
           <span style={{ fontWeight: 600, minWidth: 96, textAlign: "center" }}>
             {monthCursor.getFullYear()}.{pad2(monthCursor.getMonth() + 1)}
           </span>
-          <button type="button" onClick={() => setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1))}>
+          <button
+            type="button"
+            onClick={() => setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1))}
+          >
             下月
           </button>
           <button
@@ -260,10 +382,26 @@ export default function CalendarApp({ onBack }) {
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 14, alignItems: "start" }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+          gap: 14,
+          alignItems: "start",
+        }}
+      >
         {/* 日历网格 */}
         <div style={{ border: "1px solid #e6e2df", borderRadius: 12, padding: 10, background: "#fff" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", textAlign: "center", fontSize: 12, color: "#777", marginBottom: 6 }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(7, 1fr)",
+              textAlign: "center",
+              fontSize: 12,
+              color: "#777",
+              marginBottom: 6,
+            }}
+          >
             {["一", "二", "三", "四", "五", "六", "日"].map((w) => (
               <div key={w}>{w}</div>
             ))}
@@ -287,7 +425,11 @@ export default function CalendarApp({ onBack }) {
                     borderRadius: 8,
                     cursor: "pointer",
                     opacity: c.outside ? 0.5 : 1,
-                    border: active ? "2px solid #e57a8e" : c.isPredict ? "1px dashed #b999cb" : "1px solid #efefef",
+                    border: active
+                      ? "2px solid #e57a8e"
+                      : c.isPredict
+                      ? "1px dashed #b999cb"
+                      : "1px solid #efefef",
                     background: c.isPeriod ? "#fce8ee" : c.isPredict ? "#f5eef8" : "#fff",
                     display: "flex",
                     flexDirection: "column",
@@ -303,12 +445,12 @@ export default function CalendarApp({ onBack }) {
                     {!c.isPeriod && c.isPredict && <span style={{ color: "#76548d", fontSize: 10 }}>预</span>}
                   </div>
 
-                  {c.moodObj && (
+                  {c.latestMood && (
                     <div
                       style={{
                         fontSize: 11,
-                        background: c.moodObj.bg,
-                        color: c.moodObj.color,
+                        background: c.latestMood.bg,
+                        color: c.latestMood.color,
                         borderRadius: 5,
                         padding: "1px 3px",
                         whiteSpace: "nowrap",
@@ -316,7 +458,8 @@ export default function CalendarApp({ onBack }) {
                         textOverflow: "ellipsis",
                       }}
                     >
-                      {c.moodObj.kaomoji}
+                      {c.latestMood.kaomoji}
+                      {c.moodCount > 1 ? ` ×${c.moodCount}` : ""}
                     </div>
                   )}
 
@@ -349,8 +492,30 @@ export default function CalendarApp({ onBack }) {
             {selectedDate.getMonth() + 1}月{selectedDate.getDate()}日（周{"日一二三四五六"[selectedDate.getDay()]}）
           </div>
 
+          {/* 心情记录（支持多次 + 时间 + 修改/删除） */}
           <div style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>心情颜文字</div>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 6,
+              }}
+            >
+              <span style={{ fontSize: 13, fontWeight: 600 }}>
+                {editingLogId ? "修改心情记录" : "新增心情记录"}
+              </span>
+              <label style={{ fontSize: 12, color: "#666", display: "flex", alignItems: "center", gap: 4 }}>
+                时间
+                <input
+                  type="time"
+                  value={timeDraft}
+                  onChange={(e) => setTimeDraft(e.target.value)}
+                  style={{ padding: "2px 6px", borderRadius: 6, border: "1px solid #ddd", fontSize: 12 }}
+                />
+              </label>
+            </div>
+
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
               {MOODS.map((m) => {
                 const picked = moodDraft === m.id;
@@ -358,7 +523,7 @@ export default function CalendarApp({ onBack }) {
                   <button
                     key={m.id}
                     type="button"
-                    onClick={() => setMoodDraft(picked ? null : m.id)}
+                    onClick={() => setMoodDraft(m.id)}
                     style={{
                       textAlign: "left",
                       padding: 6,
@@ -373,18 +538,82 @@ export default function CalendarApp({ onBack }) {
                 );
               })}
             </div>
+
             <textarea
               rows={2}
               value={noteDraft}
               onChange={(e) => setNoteDraft(e.target.value)}
-              placeholder="当天备注..."
-              style={{ width: "100%", boxSizing: "border-box", marginTop: 6, padding: 6, borderRadius: 8, border: "1px solid #ddd" }}
+              placeholder="写一点这一刻的想法或备注（可选）..."
+              style={{
+                width: "100%",
+                boxSizing: "border-box",
+                marginTop: 6,
+                padding: 6,
+                borderRadius: 8,
+                border: "1px solid #ddd",
+              }}
             />
-            <button type="button" onClick={saveMood} style={{ marginTop: 6 }}>
-              保存心情
-            </button>
+
+            <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+              <button type="button" onClick={handleSaveMood}>
+                {editingLogId ? "更新记录" : "添加心情"}
+              </button>
+              {editingLogId && (
+                <button type="button" onClick={resetMoodForm}>
+                  取消编辑
+                </button>
+              )}
+            </div>
+
+            {/* 当天已记录的心情列表 */}
+            <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+              {sortedMoodLogs.length === 0 ? (
+                <div style={{ fontSize: 12, color: "#888" }}>这一天还没有心情记录</div>
+              ) : (
+                sortedMoodLogs.map((log) => {
+                  const m = MOODS.find((item) => item.id === log.moodId) || MOODS[0];
+                  return (
+                    <div
+                      key={log.id}
+                      style={{
+                        background: m.bg,
+                        color: m.color,
+                        borderRadius: 8,
+                        padding: "7px 9px",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "flex-start",
+                        gap: 8,
+                      }}
+                    >
+                      <div style={{ fontSize: 12, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600 }}>
+                          <span>{log.time}</span> · <span>{m.kaomoji}</span>{" "}
+                          <span style={{ fontWeight: 400 }}>({m.label})</span>
+                        </div>
+                        {log.note && (
+                          <div style={{ marginTop: 2, fontSize: 12, wordBreak: "break-word" }}>
+                            {log.note}
+                          </div>
+                        )}
+                      </div>
+
+                      <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                        <button type="button" onClick={() => handleStartEditLog(log)}>
+                          改
+                        </button>
+                        <button type="button" onClick={() => handleDeleteLog(log.id)}>
+                          删
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
           </div>
 
+          {/* 重要事件 */}
           <div style={{ marginBottom: 14, paddingTop: 10, borderTop: "1px solid #f0f0f0" }}>
             <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>重要事件</div>
             <form onSubmit={addEvent} style={{ display: "flex", gap: 6 }}>
@@ -408,19 +637,34 @@ export default function CalendarApp({ onBack }) {
               {(currentDay.events || []).map((ev, idx) => (
                 <div
                   key={`${ev.title}-${idx}`}
-                  style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#f7f6f4", padding: "5px 8px", borderRadius: 8, fontSize: 12 }}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    background: "#f7f6f4",
+                    padding: "5px 8px",
+                    borderRadius: 8,
+                    fontSize: 12,
+                  }}
                 >
-                  <span>[{ev.tag}] {ev.title}</span>
-                  <button type="button" onClick={() => removeEvent(idx)}>删</button>
+                  <span>
+                    [{ev.tag}] {ev.title}
+                  </span>
+                  <button type="button" onClick={() => removeEvent(idx)}>
+                    删
+                  </button>
                 </div>
               ))}
             </div>
           </div>
 
+          {/* 生理期 */}
           <div style={{ paddingTop: 10, borderTop: "1px solid #f0f0f0" }}>
             <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>生理期</div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: 12 }}>{isPeriodDay ? "当天已标为生理期" : "当天未标记生理期"}</span>
+              <span style={{ fontSize: 12 }}>
+                {isPeriodDay ? "当天已标为生理期" : "当天未标记生理期"}
+              </span>
               <button type="button" onClick={togglePeriod}>
                 {isPeriodDay ? "取消标记" : "标为经期"}
               </button>
