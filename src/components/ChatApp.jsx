@@ -78,7 +78,14 @@ function buildPhoneContextPrompt({
             const header = `${idx + 1}. 日期：${d.date || '未知'}｜周期：${
               d.windowLabel || '无'
             }｜标题：${d.title || '无标题'}`;
-            return `${header}\n正文：${d.content || ''}`;
+            const comments = Array.isArray(d.comments) ? d.comments : [];
+            const commentsBlock =
+              comments.length > 0
+                ? `\n日记下方留言：\n${comments
+                    .map((c) => `  - [${c.time || ''}] 晓菲：${c.text || ''}`)
+                    .join('\n')}`
+                : '';
+            return `${header}\n正文：${d.content || ''}${commentsBlock}`;
           })
           .join('\n\n')
       : '（你还没有写下任何日记）';
