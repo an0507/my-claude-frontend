@@ -313,7 +313,6 @@ export default function CalendarApp({ onBackHome }) {
     if (editingLogId === logId) {
       resetMoodForm();
     }
-    notifyCalendarUpdated({ date: selectedKey, action: "mood" });
   };
 
   const addEvent = (e) => {
@@ -337,24 +336,23 @@ export default function CalendarApp({ onBackHome }) {
       };
     });
     setEventInput("");
-    notifyCalendarUpdated({ date: selectedKey, action: "event" });
   };
 
   const removeEvent = (idx) => {
     setData((prev) => {
       const old = normalizeDayRecord(prev.days[selectedKey]);
+      const nextEvents = (old.events || []).filter((_, i) => i !== idx);
       return {
         ...prev,
         days: {
           ...prev.days,
           [selectedKey]: {
             ...old,
-            events: (old.events || []).filter((_, i) => i !== idx),
+            events: nextEvents,
           },
         },
       };
     });
-    notifyCalendarUpdated({ date: selectedKey, action: "event" });
   };
 
   const togglePeriod = () => {
@@ -367,7 +365,6 @@ export default function CalendarApp({ onBackHome }) {
           : [...prev.periodDays, selectedKey],
       };
     });
-    notifyCalendarUpdated({ date: selectedKey, action: "period" });
   };
 
   const selectedDate = parseDateKey(selectedKey);
@@ -745,10 +742,22 @@ export default function CalendarApp({ onBackHome }) {
                       </div>
 
                       <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-                        <button type="button" onClick={() => handleStartEditLog(log)}>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleStartEditLog(log);
+                          }}
+                        >
                           改
                         </button>
-                        <button type="button" onClick={() => handleDeleteLog(log.id)}>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteLog(log.id);
+                          }}
+                        >
                           删
                         </button>
                       </div>
@@ -829,7 +838,10 @@ export default function CalendarApp({ onBackHome }) {
                     </span>
                     <button
                       type="button"
-                      onClick={() => removeEvent(idx)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeEvent(idx);
+                      }}
                       style={{ flexShrink: 0 }}
                     >
                       删
