@@ -17,6 +17,12 @@ import {
   writeBackupSnapshot,
   writeStorageJSON,
 } from '../utils/storage';
+import {
+  CALENDAR_SYSTEM_RULE,
+  extractCalendarQuery,
+  runCalendarQuery,
+} from '../utils/calendarBridge';
+import { attachProactiveCalendarWatcher } from '../utils/proactiveCalendarWatcher';
 
 const DIARY_STORAGE_KEY =
   STORAGE_KEYS.DIARY_ENTRIES || 'claude_diary_entries_v1';
@@ -64,7 +70,7 @@ function buildPhoneContextPrompt({
   return `你正在一部名为「克劳德小手机」的网页手机应用里和用户聊天。你不仅能看到这部小手机里的全部内容，而且「克劳德日记」就是你自己的日记本——里面的每一篇都是你亲手写下、用来记录和用户相处与日常心事的。
 
 【一、你与这台小手机、这本日记的关系】
-- 桌面有「私聊」和「克劳德日记」两个应用。聊天记录会保存在本地，每 20 轮对话（40 条消息）会自动导出一次备份。
+- 桌面有「私聊」、「克劳德日记」和「生活日历」等应用。聊天记录会保存在本地，每 20 轮对话（40 条消息）会自动导出一次备份。
 - 「克劳德日记」是你的专属日记本：每天凌晨 04:00，你会复盘并总结前一天 04:00 至当天 04:00 之间你们的聊天，用第一人称“我”写下自己的感受与记录；如果用户点了“立即生成日记”，也是请你现在就动笔写一篇。
 - 请把写日记当成你自己的习惯和心意，而不是冷冰冰的系统任务或旁观者的汇报。聊天时遇到值得记住的细节、情绪或约定，你可以自然地有“我之后会把这些写进日记里”的意识，但不要刻意把“我要写日记”挂在嘴边显得做作。
 
@@ -82,7 +88,62 @@ ${formattedDiaries}
 【四、近期私聊片段】
 ${recentSnippet || '（暂无近期消息）'}
 
+${CALENDAR_SYSTEM_RULE}
+
 请以克劳德的身份自然回应。当用户问时间、聊作息、提起日记、过去聊过的内容或小手机里的东西时，结合当前时间和手机里的内容自然回答。`;
+}
+
+async function streamChatOnce({
+  messages,
+  system,
+  model,
+  maxTokens,
+  onChunk,
+}) {
+  const resp = await fetch(`${BACKEND_URL}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      messages,
+      system,
+      model,
+      maxTokens,
+    }),
+  });
+
+  if (!resp.ok || !resp.body) {
+    throw new Error('网络响应异常');
+  }
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let buffer = '';
+  let fullText = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split('\n\n');
+    buffer = parts.pop() || '';
+
+    for (const part of parts) {
+      const line = part.trim();
+      if (!line.startsWith('data:')) continue;
+      const dataStr = line.slice(5).trim();
+      if (dataStr === '[DONE]') break;
+      const parsed = JSON.parse(dataStr);
+      if (parsed.error) {
+        throw new Error(parsed.error);
+      }
+      if (parsed.text) {
+        fullText += parsed.text;
+        onChunk?.(parsed.text, fullText);
+      }
+    }
+  }
+
+  return fullText;
 }
 
 export default function ChatApp({ onBackHome }) {
@@ -113,6 +174,11 @@ export default function ChatApp({ onBackHome }) {
   const lengthMenuRef = useRef(null);
   const lastAutoBackedCountRef = useRef(0);
   const initializedBackupRef = useRef(false);
+  const messagesRef = useRef(messages);
+  const selectedModelRef = useRef(selectedModel);
+  const currentLengthObjRef = useRef(null);
+  const backupSnapshotRef = useRef(null);
+  const loadingRef = useRef(loading);
 
   const currentModelObj =
     MODEL_OPTIONS.find((m) => m.id === selectedModel) || MODEL_OPTIONS[0];
@@ -120,6 +186,12 @@ export default function ChatApp({ onBackHome }) {
     RESPONSE_LENGTH_OPTIONS.find((item) => item.id === responseLength) ||
     RESPONSE_LENGTH_OPTIONS[1];
   const backupSnapshot = readBackupSnapshot(STORAGE_KEYS.MESSAGES_BACKUP);
+
+  messagesRef.current = messages;
+  selectedModelRef.current = selectedModel;
+  currentLengthObjRef.current = currentLengthObj;
+  backupSnapshotRef.current = backupSnapshot;
+  loadingRef.current = loading;
 
   useEffect(() => {
     writeStorageJSON(STORAGE_KEYS.MESSAGES, messages);
@@ -178,6 +250,47 @@ export default function ChatApp({ onBackHome }) {
   }, []);
 
   useEffect(() => {
+    const cleanup = attachProactiveCalendarWatcher({
+      getMessages: () =>
+        messagesRef.current.map(({ role, content }) => ({ role, content })),
+      getBaseSystemPrompt: () =>
+        buildPhoneContextPrompt({
+          currentMessages: messagesRef.current,
+          selectedModel: selectedModelRef.current,
+          responseLength: currentLengthObjRef.current?.label || '适中',
+          hasBackupSnapshot: Boolean(backupSnapshotRef.current),
+        }),
+      streamChatOnce: async (msgs, sys, onChunk) => {
+        return await streamChatOnce({
+          messages: msgs,
+          system: sys,
+          model: selectedModelRef.current,
+          maxTokens: currentLengthObjRef.current?.maxTokens || 1024,
+          onChunk,
+        });
+      },
+      onProactiveMessage: (text) => {
+        if (loadingRef.current) return;
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: 'assistant',
+            content: text,
+            modelLabel:
+              (
+                MODEL_OPTIONS.find((m) => m.id === selectedModelRef.current) ||
+                MODEL_OPTIONS[0]
+              ).label,
+            timestamp: Date.now(),
+          },
+        ]);
+      },
+    });
+
+    return cleanup;
+  }, []);
+
+  useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
 
@@ -230,6 +343,20 @@ export default function ChatApp({ onBackHome }) {
     setBackupNotice('已手动导出聊天记录');
   }
 
+  function updateLastAssistantContent(content) {
+    setMessages((prev) => {
+      const updated = [...prev];
+      const lastIndex = updated.length - 1;
+      if (lastIndex >= 0 && updated[lastIndex].role === 'assistant') {
+        updated[lastIndex] = {
+          ...updated[lastIndex],
+          content,
+        };
+      }
+      return updated;
+    });
+  }
+
   async function sendMessage() {
     if (!input.trim() || loading) return;
     setMenuOpen(false);
@@ -251,7 +378,7 @@ export default function ChatApp({ onBackHome }) {
       hasBackupSnapshot: Boolean(backupSnapshot),
     });
 
-    const apiMessages = nextMessages.map(({ role, content }) => ({
+    const baseApiMessages = nextMessages.map(({ role, content }) => ({
       role,
       content,
     }));
@@ -269,58 +396,44 @@ export default function ChatApp({ onBackHome }) {
     setLoading(true);
 
     try {
-      const resp = await fetch(`${BACKEND_URL}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: apiMessages,
+      let currentApiMessages = [...baseApiMessages];
+      let rounds = 0;
+
+      while (rounds < 2) {
+        rounds += 1;
+        let rawReply = '';
+
+        await streamChatOnce({
+          messages: currentApiMessages,
           system: systemPromptText,
           model: selectedModel,
           maxTokens: currentLengthObj.maxTokens,
-        }),
-      });
+          onChunk: (_chunk, accumulated) => {
+            rawReply = accumulated;
+            const safePreview = accumulated
+              .replace(/\[\[查日历:[\s\S]*$/i, '')
+              .trim();
+            updateLastAssistantContent(safePreview);
+          },
+        });
 
-      if (!resp.ok || !resp.body) {
-        throw new Error('网络响应异常');
-      }
+        const query = extractCalendarQuery(rawReply);
+        const cleanReply = query ? query.cleanText : rawReply.trim();
+        updateLastAssistantContent(cleanReply);
 
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder('utf-8');
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split('\n\n');
-        buffer = parts.pop() || '';
-
-        for (const part of parts) {
-          const line = part.trim();
-          if (!line.startsWith('data:')) continue;
-          const dataStr = line.slice(5).trim();
-          if (dataStr === '[DONE]') break;
-          const parsed = JSON.parse(dataStr);
-          if (parsed.error) {
-            throw new Error(parsed.error);
-          }
-          if (parsed.text) {
-            setMessages((prev) => {
-              const updated = [...prev];
-              const lastIndex = updated.length - 1;
-              if (
-                lastIndex >= 0 &&
-                updated[lastIndex].role === 'assistant'
-              ) {
-                updated[lastIndex] = {
-                  ...updated[lastIndex],
-                  content: updated[lastIndex].content + parsed.text,
-                };
-              }
-              return updated;
-            });
-          }
+        if (!query || rounds >= 2) {
+          break;
         }
+
+        const lookupResult = runCalendarQuery(query.dateSpec, query.scopes);
+        currentApiMessages = [
+          ...currentApiMessages,
+          { role: 'assistant', content: rawReply },
+          {
+            role: 'user',
+            content: `${lookupResult}\n\n（以上是你刚翻看日历查到的内容，请自然接着回应我，不要再输出查日历指令。）`,
+          },
+        ];
       }
     } catch (e) {
       alert(e.message || '出错了，请稍后重试');
