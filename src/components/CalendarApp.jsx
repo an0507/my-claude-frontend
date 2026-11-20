@@ -349,7 +349,17 @@ export default function CalendarApp({ onBackHome }) {
   const isPeriodDay = data.periodDays.includes(selectedKey);
 
   return (
-    <div style={{ padding: 14, maxWidth: 980, margin: "0 auto", fontFamily: "inherit" }}>
+    <div
+      style={{
+        padding: 12,
+        width: "100%",
+        maxWidth: 980,
+        margin: "0 auto",
+        boxSizing: "border-box",
+        overflowX: "hidden",
+        fontFamily: "inherit",
+      }}
+    >
       <div
         style={{
           display: "flex",
@@ -358,30 +368,37 @@ export default function CalendarApp({ onBackHome }) {
           flexWrap: "wrap",
           gap: 8,
           marginBottom: 12,
+          minWidth: 0,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
           {onBackHome && (
-            <button type="button" onClick={onBackHome}>
+            <button type="button" onClick={onBackHome} style={{ flexShrink: 0 }}>
               返回
             </button>
           )}
-          <h2 style={{ margin: 0, fontSize: 18 }}>生活日历 ʚ˃ ᵕ ˂ɞ</h2>
+          <h2 style={{ margin: 0, fontSize: 17, whiteSpace: "nowrap" }}>
+            生活日历 ʚ˃ ᵕ ˂ɞ
+          </h2>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
           <button
             type="button"
-            onClick={() => setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() - 1, 1))}
+            onClick={() =>
+              setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() - 1, 1))
+            }
           >
             上月
           </button>
-          <span style={{ fontWeight: 600, minWidth: 96, textAlign: "center" }}>
+          <span style={{ fontWeight: 600, minWidth: 74, textAlign: "center", fontSize: 14 }}>
             {monthCursor.getFullYear()}.{pad2(monthCursor.getMonth() + 1)}
           </span>
           <button
             type="button"
-            onClick={() => setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1))}
+            onClick={() =>
+              setMonthCursor(new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1))
+            }
           >
             下月
           </button>
@@ -400,16 +417,27 @@ export default function CalendarApp({ onBackHome }) {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
-          gap: 14,
+          gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+          gap: 12,
           alignItems: "start",
+          minWidth: 0,
         }}
       >
-        <div style={{ border: "1px solid #e6e2df", borderRadius: 12, padding: 10, background: "#fff" }}>
+        <div
+          style={{
+            border: "1px solid #e6e2df",
+            borderRadius: 12,
+            padding: 8,
+            background: "#fff",
+            minWidth: 0,
+            overflow: "hidden",
+            boxSizing: "border-box",
+          }}
+        >
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(7, 1fr)",
+              gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
               textAlign: "center",
               fontSize: 12,
               color: "#777",
@@ -417,11 +445,20 @@ export default function CalendarApp({ onBackHome }) {
             }}
           >
             {["一", "二", "三", "四", "五", "六", "日"].map((w) => (
-              <div key={w}>{w}</div>
+              <div key={w} style={{ minWidth: 0 }}>
+                {w}
+              </div>
             ))}
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
+              gap: 3,
+              minWidth: 0,
+            }}
+          >
             {cells.map((c) => {
               const active = c.key === selectedKey;
               return (
@@ -434,10 +471,13 @@ export default function CalendarApp({ onBackHome }) {
                     }
                   }}
                   style={{
-                    minHeight: 74,
-                    padding: 4,
+                    minHeight: 68,
+                    minWidth: 0,
+                    overflow: "hidden",
+                    padding: 3,
                     borderRadius: 8,
                     cursor: "pointer",
+                    boxSizing: "border-box",
                     opacity: c.outside ? 0.5 : 1,
                     border: active
                       ? "2px solid #e57a8e"
@@ -450,19 +490,38 @@ export default function CalendarApp({ onBackHome }) {
                     gap: 2,
                   }}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
-                    <span style={{ fontWeight: c.isToday ? 700 : 400 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      fontSize: 11,
+                      minWidth: 0,
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontWeight: c.isToday ? 700 : 400,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
                       {c.num}
                       {c.isToday ? "·今" : ""}
                     </span>
-                    {c.isPeriod && <span style={{ color: "#c93b5b", fontSize: 10 }}>经</span>}
-                    {!c.isPeriod && c.isPredict && <span style={{ color: "#76548d", fontSize: 10 }}>预</span>}
+                    {c.isPeriod && (
+                      <span style={{ color: "#c93b5b", fontSize: 10, flexShrink: 0 }}>经</span>
+                    )}
+                    {!c.isPeriod && c.isPredict && (
+                      <span style={{ color: "#76548d", fontSize: 10, flexShrink: 0 }}>预</span>
+                    )}
                   </div>
 
                   {c.latestMood && (
                     <div
                       style={{
-                        fontSize: 11,
+                        fontSize: 10,
                         background: c.latestMood.bg,
                         color: c.latestMood.color,
                         borderRadius: 5,
@@ -470,6 +529,7 @@ export default function CalendarApp({ onBackHome }) {
                         whiteSpace: "nowrap",
                         overflow: "hidden",
                         textOverflow: "ellipsis",
+                        maxWidth: "100%",
                       }}
                     >
                       {c.latestMood.kaomoji}
@@ -488,6 +548,7 @@ export default function CalendarApp({ onBackHome }) {
                         whiteSpace: "nowrap",
                         overflow: "hidden",
                         textOverflow: "ellipsis",
+                        maxWidth: "100%",
                       }}
                     >
                       {c.events[0].title}
@@ -500,9 +561,20 @@ export default function CalendarApp({ onBackHome }) {
           </div>
         </div>
 
-        <div style={{ border: "1px solid #e6e2df", borderRadius: 12, padding: 12, background: "#fff" }}>
+        <div
+          style={{
+            border: "1px solid #e6e2df",
+            borderRadius: 12,
+            padding: 12,
+            background: "#fff",
+            minWidth: 0,
+            overflow: "hidden",
+            boxSizing: "border-box",
+          }}
+        >
           <div style={{ fontWeight: 700, marginBottom: 10 }}>
-            {selectedDate.getMonth() + 1}月{selectedDate.getDate()}日（周{"日一二三四五六"[selectedDate.getDay()]}）
+            {selectedDate.getMonth() + 1}月{selectedDate.getDate()}日（周
+            {"日一二三四五六"[selectedDate.getDay()]}）
           </div>
 
           <div style={{ marginBottom: 14 }}>
@@ -511,24 +583,46 @@ export default function CalendarApp({ onBackHome }) {
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "center",
+                flexWrap: "wrap",
+                gap: 6,
                 marginBottom: 6,
               }}
             >
               <span style={{ fontSize: 13, fontWeight: 600 }}>
                 {editingLogId ? "修改心情记录" : "新增心情记录"}
               </span>
-              <label style={{ fontSize: 12, color: "#666", display: "flex", alignItems: "center", gap: 4 }}>
+              <label
+                style={{
+                  fontSize: 12,
+                  color: "#666",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
+                }}
+              >
                 时间
                 <input
                   type="time"
                   value={timeDraft}
                   onChange={(e) => setTimeDraft(e.target.value)}
-                  style={{ padding: "2px 6px", borderRadius: 6, border: "1px solid #ddd", fontSize: 12 }}
+                  style={{
+                    padding: "2px 6px",
+                    borderRadius: 6,
+                    border: "1px solid #ddd",
+                    fontSize: 12,
+                    maxWidth: "100%",
+                  }}
                 />
               </label>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(115px, 1fr))",
+                gap: 6,
+              }}
+            >
               {MOODS.map((m) => {
                 const picked = moodDraft === m.id;
                 return (
@@ -542,9 +636,20 @@ export default function CalendarApp({ onBackHome }) {
                       borderRadius: 8,
                       border: picked ? "2px solid #e57a8e" : "1px solid #e2e2e2",
                       background: picked ? m.bg : "#fff",
+                      minWidth: 0,
                     }}
                   >
-                    <div style={{ fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" }}>{m.kaomoji}</div>
+                    <div
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 600,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {m.kaomoji}
+                    </div>
                     <div style={{ fontSize: 11, color: "#666" }}>{m.label}</div>
                   </button>
                 );
@@ -566,7 +671,7 @@ export default function CalendarApp({ onBackHome }) {
               }}
             />
 
-            <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+            <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
               <button type="button" onClick={handleSaveMood}>
                 {editingLogId ? "更新记录" : "添加心情"}
               </button>
@@ -595,10 +700,11 @@ export default function CalendarApp({ onBackHome }) {
                         justifyContent: "space-between",
                         alignItems: "flex-start",
                         gap: 8,
+                        minWidth: 0,
                       }}
                     >
-                      <div style={{ fontSize: 12, minWidth: 0 }}>
-                        <div style={{ fontWeight: 600 }}>
+                      <div style={{ fontSize: 12, minWidth: 0, flex: 1 }}>
+                        <div style={{ fontWeight: 600, wordBreak: "break-word" }}>
                           <span>{log.time}</span> · <span>{m.kaomoji}</span>{" "}
                           <span style={{ fontWeight: 400 }}>({m.label})</span>
                         </div>
@@ -626,7 +732,10 @@ export default function CalendarApp({ onBackHome }) {
 
           <div style={{ marginBottom: 14, paddingTop: 10, borderTop: "1px solid #f0f0f0" }}>
             <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>重要事件</div>
-            <form onSubmit={addEvent} style={{ display: "flex", gap: 6 }}>
+            <form
+              onSubmit={addEvent}
+              style={{ display: "flex", gap: 6, flexWrap: "wrap", minWidth: 0 }}
+            >
               <select value={eventTag} onChange={(e) => setEventTag(e.target.value)}>
                 <option value="重要">重要</option>
                 <option value="工作">工作</option>
@@ -638,7 +747,13 @@ export default function CalendarApp({ onBackHome }) {
                 value={eventInput}
                 onChange={(e) => setEventInput(e.target.value)}
                 placeholder="事件标题..."
-                style={{ flex: 1, padding: "5px 8px", borderRadius: 8, border: "1px solid #ddd" }}
+                style={{
+                  flex: "1 1 120px",
+                  minWidth: 0,
+                  padding: "5px 8px",
+                  borderRadius: 8,
+                  border: "1px solid #ddd",
+                }}
               />
               <button type="submit">添加</button>
             </form>
@@ -651,16 +766,22 @@ export default function CalendarApp({ onBackHome }) {
                     display: "flex",
                     justifyContent: "space-between",
                     alignItems: "center",
+                    gap: 8,
                     background: "#f7f6f4",
                     padding: "5px 8px",
                     borderRadius: 8,
                     fontSize: 12,
+                    minWidth: 0,
                   }}
                 >
-                  <span>
+                  <span style={{ wordBreak: "break-word", minWidth: 0 }}>
                     [{ev.tag}] {ev.title}
                   </span>
-                  <button type="button" onClick={() => removeEvent(idx)}>
+                  <button
+                    type="button"
+                    onClick={() => removeEvent(idx)}
+                    style={{ flexShrink: 0 }}
+                  >
                     删
                   </button>
                 </div>
@@ -670,7 +791,15 @@ export default function CalendarApp({ onBackHome }) {
 
           <div style={{ paddingTop: 10, borderTop: "1px solid #f0f0f0" }}>
             <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>生理期</div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                flexWrap: "wrap",
+                gap: 6,
+              }}
+            >
               <span style={{ fontSize: 12 }}>
                 {isPeriodDay ? "当天已标为生理期" : "当天未标记生理期"}
               </span>
