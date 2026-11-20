@@ -2,6 +2,7 @@ import { useState } from 'react';
 import ChatApp from './components/ChatApp';
 import DiaryApp from './components/DiaryApp';
 import PhoneHome from './components/PhoneHome';
+import CalendarApp from './components/CalendarApp';
 
 export default function App() {
   const [activeApp, setActiveApp] = useState('home');
@@ -39,6 +40,8 @@ export default function App() {
           <PhoneHome onOpenApp={(appId) => setActiveApp(appId)} />
         ) : activeApp === 'diary' ? (
           <DiaryApp onBackHome={() => setActiveApp('home')} />
+        ) : activeApp === 'calendar' ? (
+          <CalendarApp onBackHome={() => setActiveApp('home')} />
         ) : (
           <ChatApp onBackHome={() => setActiveApp('home')} />
         )}
