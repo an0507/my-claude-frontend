@@ -175,6 +175,14 @@ export default function CalendarApp({ onBackHome }) {
     resetMoodForm();
   }, [selectedKey]);
 
+  useEffect(() => {
+    const handleExternalUpdate = () => {
+      setData(loadData());
+    };
+    window.addEventListener("calendar:updated", handleExternalUpdate);
+    return () => window.removeEventListener("calendar:updated", handleExternalUpdate);
+  }, []);
+
   const currentDay = normalizeDayRecord(data.days[selectedKey]);
   const sortedMoodLogs = useMemo(() => {
     return [...(currentDay.moodLogs || [])].sort((a, b) =>
