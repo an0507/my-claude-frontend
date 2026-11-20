@@ -15,7 +15,12 @@ export function notifyCalendarUpdated(detail) {
 }
 
 function getEventColorStyle(ev) {
-  if (ev?.source === "claude") {
+  const isClaudeEvent =
+    ev?.source === "claude" ||
+    ev?.createdBy === "小克" ||
+    (typeof ev?.title === "string" && ev.title.startsWith("[小克]"));
+
+  if (isClaudeEvent) {
     return {
       bg: "#e6f2ff",
       color: "#1d5fa7",
