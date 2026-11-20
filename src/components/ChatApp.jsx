@@ -19,8 +19,11 @@ import {
 } from '../utils/storage';
 import {
   CALENDAR_SYSTEM_RULE,
+  extractCalendarEventAdd,
   extractCalendarQuery,
+  runCalendarEventAdd,
   runCalendarQuery,
+  stripCalendarControlTokens,
 } from '../utils/calendarBridge';
 import { attachProactiveCalendarWatcher } from '../utils/proactiveCalendarWatcher';
 
@@ -448,27 +451,35 @@ export default function ChatApp({ onBackHome }) {
           onChunk: (_chunk, accumulated) => {
             rawReply = accumulated;
             const safePreview = accumulated
-              .replace(/\[\[查日历:[\s\S]*$/i, '')
+              .replace(/\[\[(?:查日历|记日历事件):[\s\S]*$/i, '')
               .trim();
             updateLastAssistantContent(safePreview);
           },
         });
 
+        const eventAdd = extractCalendarEventAdd(rawReply);
         const query = extractCalendarQuery(rawReply);
-        const cleanReply = query ? query.cleanText : rawReply.trim();
+        const cleanReply = stripCalendarControlTokens(rawReply);
         updateLastAssistantContent(cleanReply);
 
-        if (!query || rounds >= 2) {
+        const feedbackParts = [];
+        if (eventAdd) {
+          feedbackParts.push(runCalendarEventAdd(eventAdd));
+        }
+        if (query && rounds < 2) {
+          feedbackParts.push(runCalendarQuery(query.dateSpec, query.scopes));
+        }
+
+        if (feedbackParts.length === 0 || rounds >= 2) {
           break;
         }
 
-        const lookupResult = runCalendarQuery(query.dateSpec, query.scopes);
         currentApiMessages = [
           ...currentApiMessages,
           { role: 'assistant', content: rawReply },
           {
             role: 'user',
-            content: `${lookupResult}\n\n（以上是你刚翻看日历查到的内容，请自然接着回应我，不要再输出查日历指令。）`,
+            content: `${feedbackParts.join('\n')}\n\n（以上是你刚完成的日历操作/查阅结果，请自然接着回应我，不要再输出日历指令。）`,
           },
         ];
       }
