@@ -72,44 +72,33 @@ function formatMessageTime(ts, now = new Date()) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hhmm}`;
 }
 
-function buildPhoneContextPrompt({
-  currentMessages = [],
-  selectedModel,
-  responseLength,
-  hasBackupSnapshot,
-}) {
-  const nowDate = new Date();
-  const currentTimeStr = formatCurrentClock(nowDate);
+function formatDiariesBlock(allDiaries = []) {
+  if (!Array.isArray(allDiaries) || allDiaries.length === 0) {
+    return '（你还没有写下任何日记）';
+  }
+
+  return allDiaries
+    .map((d, idx) => {
+      const header = `${idx + 1}. 日期：${d.date || '未知'}｜周期：${
+        d.windowLabel || '无'
+      }｜标题：${d.title || '无标题'}`;
+      const comments = Array.isArray(d.comments) ? d.comments : [];
+      const commentsBlock =
+        comments.length > 0
+          ? `\n日记下方留言：\n${comments
+              .map((c) => `  - [${c.time || ''}] 晓菲：${c.text || ''}`)
+              .join('\n')}`
+          : '';
+      return `${header}\n正文：${d.content || ''}${commentsBlock}`;
+    })
+    .join('\n\n');
+}
+
+// 稳定前缀：尽量不包含每轮都会变的秒级时间或消息计数，便于命中 Prompt Cache
+function buildStableSystemPrompt() {
   const diaryList = readStorageJSON(DIARY_STORAGE_KEY, []);
   const allDiaries = Array.isArray(diaryList) ? diaryList : [];
-
-  const formattedDiaries =
-    allDiaries.length > 0
-      ? allDiaries
-          .map((d, idx) => {
-            const header = `${idx + 1}. 日期：${d.date || '未知'}｜周期：${
-              d.windowLabel || '无'
-            }｜标题：${d.title || '无标题'}`;
-            const comments = Array.isArray(d.comments) ? d.comments : [];
-            const commentsBlock =
-              comments.length > 0
-                ? `\n日记下方留言：\n${comments
-                    .map((c) => `  - [${c.time || ''}] 晓菲：${c.text || ''}`)
-                    .join('\n')}`
-                : '';
-            return `${header}\n正文：${d.content || ''}${commentsBlock}`;
-          })
-          .join('\n\n')
-      : '（你还没有写下任何日记）';
-
-  const recentSnippet = currentMessages
-    .slice(-20)
-    .map((m) => {
-      const timeLabel = formatMessageTime(m.timestamp, nowDate);
-      const sender = m.role === 'user' ? '用户' : '克劳德';
-      return `[${timeLabel}] ${sender}：${m.content || ''}`;
-    })
-    .join('\n');
+  const formattedDiaries = formatDiariesBlock(allDiaries);
 
   return `你正在一部名为「克劳德小手机」的网页手机应用里和用户聊天。你不仅能看到这部小手机里的全部内容，而且「克劳德日记」就是你自己的日记本——里面的每一篇都是你亲手写下、用来记录和用户相处与日常心事的。
 
@@ -118,7 +107,37 @@ function buildPhoneContextPrompt({
 - 「克劳德日记」是你的专属日记本：每天凌晨 04:00，你会复盘并总结前一天 04:00 至当天 04:00 之间你们的聊天，用第一人称“我”写下自己的感受与记录；如果用户点了“立即生成日记”，也是请你现在就动笔写一篇。
 - 请把写日记当成你自己的习惯和心意，而不是冷冰冰的系统任务或旁观者的汇报。聊天时遇到值得记住的细节、情绪或约定，你可以自然地有“我之后会把这些写进日记里”的意识，但不要刻意把“我要写日记”挂在嘴边显得做作。
 
-【二、小手机当前时间与状态】
+【二、你写过的全部日记】
+${formattedDiaries}
+
+${CALENDAR_SYSTEM_RULE}
+
+请以克劳德的身份自然回应。当用户问时间、聊作息、提起日记、过去聊过的内容或小手机里的东西时，结合当前时间和手机里的内容自然回答。
+- 如果你想像真人聊天那样连发多条短消息，可以用 [[分句]] 把不同气泡隔开（一般 2～4 条即可，保持自然克制，不要过度刷屏）；如果只想回一条，直接正常说话即可，不要加 [[分句]]。`;
+}
+
+// 动态状态后缀：放在本轮消息末尾，避免打断前面大段缓存前缀
+function buildDynamicTurnContext({
+  currentMessages = [],
+  selectedModel,
+  responseLength,
+  hasBackupSnapshot,
+  nowDate = new Date(),
+}) {
+  const currentTimeStr = formatCurrentClock(nowDate);
+  const diaryList = readStorageJSON(DIARY_STORAGE_KEY, []);
+  const allDiaries = Array.isArray(diaryList) ? diaryList : [];
+
+  const recentSnippet = currentMessages
+    .slice(-12)
+    .map((m) => {
+      const timeLabel = formatMessageTime(m.timestamp, nowDate);
+      const sender = m.role === 'user' ? '用户' : '克劳德';
+      return `[${timeLabel}] ${sender}：${m.content || ''}`;
+    })
+    .join('\n');
+
+  return `【小手机当前时间与状态】
 - 当前现实时间（与主页时钟一致）：${currentTimeStr}
 - 当前选用模型：${selectedModel}
 - 当前回复长度设置：${responseLength}
@@ -126,16 +145,8 @@ function buildPhoneContextPrompt({
 - 是否有本地备份快照：${hasBackupSnapshot ? '有' : '无'}
 - 你已写下的日记总数：${allDiaries.length} 篇
 
-【三、你写过的全部日记】
-${formattedDiaries}
-
-【四、近期私聊片段】
-${recentSnippet || '（暂无近期消息）'}
-
-${CALENDAR_SYSTEM_RULE}
-
-请以克劳德的身份自然回应。当用户问时间、聊作息、提起日记、过去聊过的内容或小手机里的东西时，结合当前时间和手机里的内容自然回答。
-- 如果你想像真人聊天那样连发多条短消息，可以用 [[分句]] 把不同气泡隔开（一般 2～4 条即可，保持自然克制，不要过度刷屏）；如果只想回一条，直接正常说话即可，不要加 [[分句]]。`;
+【近期私聊片段】
+${recentSnippet || '（暂无近期消息）'}`;
 }
 
 async function streamChatOnce({
@@ -298,13 +309,7 @@ export default function ChatApp({ onBackHome }) {
     const cleanup = attachProactiveCalendarWatcher({
       getMessages: () =>
         messagesRef.current.map(({ role, content }) => ({ role, content })),
-      getBaseSystemPrompt: () =>
-        buildPhoneContextPrompt({
-          currentMessages: messagesRef.current,
-          selectedModel: selectedModelRef.current,
-          responseLength: currentLengthObjRef.current?.label || '适中',
-          hasBackupSnapshot: Boolean(backupSnapshotRef.current),
-        }),
+      getBaseSystemPrompt: () => buildStableSystemPrompt(),
       streamChatOnce: async (msgs, sys, onChunk) => {
         return await streamChatOnce({
           messages: msgs,
@@ -425,19 +430,28 @@ export default function ChatApp({ onBackHome }) {
     };
     const nextMessages = [...messages, userMessage];
 
-    const systemPromptText = buildPhoneContextPrompt({
+    const systemPromptText = buildStableSystemPrompt();
+    const dynamicContext = buildDynamicTurnContext({
       currentMessages: nextMessages,
       selectedModel,
       responseLength: currentLengthObj.label,
       hasBackupSnapshot: Boolean(backupSnapshot),
+      nowDate,
     });
 
-    const baseApiMessages = nextMessages.map(({ role, content, timestamp }) => {
+    const baseApiMessages = nextMessages.map(({ role, content, timestamp }, idx) => {
       const timeLabel = formatMessageTime(timestamp, nowDate);
       const prefix = role === 'user' ? `[${timeLabel}] ` : '';
+      const baseText = `${prefix}${content || ''}`;
+      if (role === 'user' && idx === nextMessages.length - 1) {
+        return {
+          role,
+          content: `${baseText}\n\n${dynamicContext}`,
+        };
+      }
       return {
         role,
-        content: `${prefix}${content || ''}`,
+        content: baseText,
       };
     });
 
