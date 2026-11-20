@@ -100,7 +100,7 @@ function formatSingleDaySummary(dateKey, rawData) {
   if (day.events.length > 0) {
     lines.push(`- 重要事件（共 ${day.events.length} 条）：`);
     day.events.forEach((ev) => {
-      const author = ev?.source === "claude" ? "小克·蓝" : "我·粉";
+      const author = ev?.source === "claude" || ev?.createdBy === "小克" ? "小克·蓝" : "我·粉";
       lines.push(`  · [${ev.tag || "事件"}·${author}] ${ev.title || ""}`);
     });
   } else {
@@ -164,7 +164,10 @@ export function runCalendarQuery(dateSpec = "今天", scopes = ["all"]) {
   const wantEvents =
     wantAll || normalizedScopes.includes("events") || normalizedScopes.includes("事件");
   const wantPeriod =
-    wantAll || normalizedScopes.includes("period") || normalizedScopes.includes("经期") || normalizedScopes.includes("生理期");
+    wantAll ||
+    normalizedScopes.includes("period") ||
+    normalizedScopes.includes("经期") ||
+    normalizedScopes.includes("生理期");
 
   const blocks = keys.map((key) => {
     const day = normalizeDayForRead(data.days?.[key]);
@@ -196,7 +199,7 @@ export function runCalendarQuery(dateSpec = "今天", scopes = ["all"]) {
         parts.push(
           `- 事件：${day.events
             .map((ev) => {
-              const author = ev?.source === "claude" ? "小克·蓝" : "我·粉";
+              const author = ev?.source === "claude" || ev?.createdBy === "小克" ? "小克·蓝" : "我·粉";
               return `[${ev.tag || "事件"}·${author}] ${ev.title}`;
             })
             .join("；")}`
