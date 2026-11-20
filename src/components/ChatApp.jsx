@@ -30,6 +30,15 @@ import { attachProactiveCalendarWatcher } from '../utils/proactiveCalendarWatche
 const DIARY_STORAGE_KEY =
   STORAGE_KEYS.DIARY_ENTRIES || 'claude_diary_entries_v1';
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function splitMultiBubbles(text = '') {
+  return String(text || '')
+    .split(/\[\[\s*分句\s*\]\]/g)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
 function formatCurrentClock(now = new Date()) {
   const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
   const year = now.getFullYear();
@@ -125,7 +134,8 @@ ${recentSnippet || '（暂无近期消息）'}
 
 ${CALENDAR_SYSTEM_RULE}
 
-请以克劳德的身份自然回应。当用户问时间、聊作息、提起日记、过去聊过的内容或小手机里的东西时，结合当前时间和手机里的内容自然回答。`;
+请以克劳德的身份自然回应。当用户问时间、聊作息、提起日记、过去聊过的内容或小手机里的东西时，结合当前时间和手机里的内容自然回答。
+- 如果你想像真人聊天那样连发多条短消息，可以用 [[分句]] 把不同气泡隔开（一般 2～4 条即可，保持自然克制，不要过度刷屏）；如果只想回一条，直接正常说话即可，不要加 [[分句]]。`;
 }
 
 async function streamChatOnce({
@@ -304,21 +314,29 @@ export default function ChatApp({ onBackHome }) {
           onChunk,
         });
       },
-      onProactiveMessage: (text) => {
+      onProactiveMessage: async (text) => {
         if (loadingRef.current) return;
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: 'assistant',
-            content: text,
-            modelLabel:
-              (
-                MODEL_OPTIONS.find((m) => m.id === selectedModelRef.current) ||
-                MODEL_OPTIONS[0]
-              ).label,
-            timestamp: Date.now(),
-          },
-        ]);
+        const modelLabel = (
+          MODEL_OPTIONS.find((m) => m.id === selectedModelRef.current) ||
+          MODEL_OPTIONS[0]
+        ).label;
+        const bubbles = splitMultiBubbles(text);
+        const list = bubbles.length > 0 ? bubbles : [text.trim()].filter(Boolean);
+
+        for (let idx = 0; idx < list.length; idx += 1) {
+          if (idx > 0) {
+            await sleep(500);
+          }
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: 'assistant',
+              content: list[idx],
+              modelLabel,
+              timestamp: Date.now() + idx,
+            },
+          ]);
+        }
       },
     });
 
@@ -438,6 +456,8 @@ export default function ChatApp({ onBackHome }) {
     try {
       let currentApiMessages = [...baseApiMessages];
       let rounds = 0;
+      let firstPartText = '';
+      let finalCombinedText = '';
 
       while (rounds < 2) {
         rounds += 1;
@@ -452,15 +472,19 @@ export default function ChatApp({ onBackHome }) {
             rawReply = accumulated;
             const safePreview = accumulated
               .replace(/\[\[(?:查日历|记日历事件):[\s\S]*$/i, '')
+              .replace(/\[\[\s*分句\s*\]\][\s\S]*$/i, '')
               .trim();
-            updateLastAssistantContent(safePreview);
+            const previewText =
+              rounds > 1 && firstPartText
+                ? `${firstPartText}\n\n${safePreview}`.trim()
+                : safePreview;
+            updateLastAssistantContent(previewText);
           },
         });
 
         const eventAdd = extractCalendarEventAdd(rawReply);
         const query = extractCalendarQuery(rawReply);
         const cleanReply = stripCalendarControlTokens(rawReply);
-        updateLastAssistantContent(cleanReply);
 
         const feedbackParts = [];
         if (eventAdd) {
@@ -471,8 +495,15 @@ export default function ChatApp({ onBackHome }) {
         }
 
         if (feedbackParts.length === 0 || rounds >= 2) {
+          finalCombinedText =
+            rounds > 1 && firstPartText
+              ? `${firstPartText}\n\n${cleanReply}`.trim()
+              : cleanReply;
           break;
         }
+
+        firstPartText = cleanReply;
+        updateLastAssistantContent(firstPartText);
 
         currentApiMessages = [
           ...currentApiMessages,
@@ -482,6 +513,26 @@ export default function ChatApp({ onBackHome }) {
             content: `${feedbackParts.join('\n')}\n\n（以上是你刚完成的日历操作/查阅结果，请自然接着回应我，不要再输出日历指令。）`,
           },
         ];
+      }
+
+      const bubbles = splitMultiBubbles(finalCombinedText);
+      const firstBubble = bubbles[0] ?? '';
+      const restBubbles = bubbles.slice(1);
+
+      updateLastAssistantContent(firstBubble);
+
+      for (let idx = 0; idx < restBubbles.length; idx += 1) {
+        await sleep(550);
+        const bubbleText = restBubbles[idx];
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: 'assistant',
+            content: bubbleText,
+            modelLabel: currentModelObj.label,
+            timestamp: Date.now() + idx + 1,
+          },
+        ]);
       }
     } catch (e) {
       alert(e.message || '出错了，请稍后重试');
