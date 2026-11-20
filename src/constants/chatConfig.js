@@ -5,7 +5,7 @@ export const MODEL_OPTIONS = [
   { id: 'claude-opus-4-6', label: 'claude-opus-4-6' },
   { id: 'claude-fable-5-2', label: 'Claude Fable 5.2' },
   { id: 'claude-fable-5-1', label: 'Claude Fable 5.1' },
-  { id: 'claude-fable-5-0', label: 'Claude Fable 5.0' },
+  { id: 'claude-fable-5', label: 'Claude Fable 5' },
   { id: 'claude-opus-5-5', label: 'Claude Opus 5.5' },
   { id: 'claude-opus-5', label: 'Claude Opus 5' },
 ];
@@ -27,8 +27,7 @@ export const STORAGE_KEYS = {
   RESPONSE_LENGTH: 'claude_response_length_v1',
 };
 
-// 20 轮对话 = 40 条消息（用户 + 助手各算 1 条）；若你想每 20 条消息备份一次，改成 20 即可
 export const AUTO_BACKUP_CONFIG = {
   ENABLED: true,
-  EVERY_N_MESSAGES: 40,
+  EVERY_N_MESSAGES: 40, // 20 轮对话 = 40 条消息
 };
