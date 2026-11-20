@@ -1,18 +1,13 @@
 import {
   CALENDAR_SYSTEM_RULE,
+  extractCalendarEventAdd,
   extractCalendarQuery,
   isPassResponse,
+  runCalendarEventAdd,
   runCalendarQuery,
+  stripCalendarControlTokens,
 } from "./calendarBridge";
 
-/**
- * 挂载日历变动监听：用户记完心情/事件/经期后，由 AI 自己决定要不要看并主动说话
- * @param {Object} params
- * @param {Function} params.getMessages - 获取当前聊天消息数组 () => messages
- * @param {Function} params.getBaseSystemPrompt - 获取原有系统提示词 () => string
- * @param {Function} params.streamChatOnce - 单次流式请求 (msgs, sys, onChunk) => Promise<string>
- * @param {Function} params.onProactiveMessage - 当 AI 决定主动开口时回调 (finalText) => void
- */
 export function attachProactiveCalendarWatcher({
   getMessages,
   getBaseSystemPrompt,
@@ -24,6 +19,8 @@ export function attachProactiveCalendarWatcher({
 
   const handleUpdated = (event) => {
     const detail = event.detail || {};
+    if (detail.source === "claude") return;
+
     const date = detail.date || "";
     const actionLabel =
       detail.action === "mood"
@@ -48,8 +45,8 @@ export function attachProactiveCalendarWatcher({
           role: "user",
           content:
             `[系统提示：对方刚刚在生活日历的 ${date || "某天"} 更新了「${actionLabel}」。` +
-            `你可以自己决定要不要去看日历、要不要主动跟对方说句话。` +
-            `如果决定不看或不说话，请只回复 [PASS]；如果想看某天/某项内容，请输出 [[查日历: YYYY-MM-DD, scope]]。]`,
+            `你可以自己决定要不要去看日历、要不要记事件、要不要主动跟对方说句话。` +
+            `如果决定不看或不说话，请只回复 [PASS]；如果想看某天/某项内容，请输出 [[查日历: YYYY-MM-DD, scope]]；如果想记事件，请输出 [[记日历事件: YYYY-MM-DD, 标签, 标题]]。]`,
         };
 
         let firstReply = "";
@@ -61,24 +58,33 @@ export function attachProactiveCalendarWatcher({
           return;
         }
 
+        const eventAdd = extractCalendarEventAdd(firstReply);
         const query = extractCalendarQuery(firstReply);
-        if (!query) {
-          const clean = firstReply.trim();
+
+        let contextNote = "";
+        if (eventAdd) {
+          const addRes = runCalendarEventAdd(eventAdd);
+          contextNote += `${addRes}\n`;
+        }
+        if (query) {
+          contextNote += `${runCalendarQuery(query.dateSpec, query.scopes)}\n`;
+        }
+
+        if (!contextNote) {
+          const clean = stripCalendarControlTokens(firstReply);
           if (clean && !isPassResponse(clean)) {
             onProactiveMessage(clean);
           }
           return;
         }
 
-        // 小克决定查日历：读取对应数据后再生成主动回复
-        const lookupResult = runCalendarQuery(query.dateSpec, query.scopes);
         const followUpMessages = [
           ...history,
           triggerMsg,
           { role: "assistant", content: firstReply },
           {
             role: "user",
-            content: `${lookupResult}\n\n（以上是你刚翻看日历查到的内容。如果觉得值得主动跟对方聊一句，请自然地说出来；如果看完觉得没必要打扰，请只回复 [PASS]。）`,
+            content: `${contextNote.trim()}\n\n（以上是你刚完成的日历操作/查阅结果。如果觉得值得主动跟对方聊一句，请自然地说出来；如果看完觉得没必要打扰，请只回复 [PASS]。）`,
           },
         ];
 
@@ -87,12 +93,14 @@ export function attachProactiveCalendarWatcher({
           secondReply += chunk;
         });
 
-        const finalText = (secondReply || query.cleanText || "").trim();
+        const finalText = stripCalendarControlTokens(
+          secondReply || eventAdd?.cleanText || query?.cleanText || ""
+        );
         if (finalText && !isPassResponse(finalText)) {
           onProactiveMessage(finalText);
         }
       } catch (err) {
-        console.error("日历主动查阅流程出错:", err);
+        console.error("日历主动查阅/记事件出错:", err);
       } finally {
         running = false;
       }
