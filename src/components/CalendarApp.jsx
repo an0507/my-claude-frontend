@@ -14,6 +14,23 @@ export function notifyCalendarUpdated(detail) {
   window.dispatchEvent(new CustomEvent("calendar:updated", { detail }));
 }
 
+function getEventColorStyle(ev) {
+  if (ev?.source === "claude") {
+    return {
+      bg: "#e6f2ff",
+      color: "#1d5fa7",
+      border: "1px solid #bddcff",
+      badge: "小克",
+    };
+  }
+  return {
+    bg: "#fde8f0",
+    color: "#b02a5b",
+    border: "1px solid #f7c5d8",
+    badge: "我",
+  };
+}
+
 function pad2(n) {
   return String(n).padStart(2, "0");
 }
@@ -306,7 +323,10 @@ export default function CalendarApp({ onBackHome }) {
           ...prev.days,
           [selectedKey]: {
             ...old,
-            events: [...(old.events || []), { title, tag: eventTag }],
+            events: [
+              ...(old.events || []),
+              { title, tag: eventTag, source: "user", createdBy: "我" },
+            ],
           },
         },
       };
@@ -537,24 +557,28 @@ export default function CalendarApp({ onBackHome }) {
                     </div>
                   )}
 
-                  {c.events.length > 0 && (
-                    <div
-                      style={{
-                        fontSize: 10,
-                        background: "#eaf2fa",
-                        color: "#2b547e",
-                        borderRadius: 5,
-                        padding: "1px 3px",
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        maxWidth: "100%",
-                      }}
-                    >
-                      {c.events[0].title}
-                      {c.events.length > 1 ? `(${c.events.length})` : ""}
-                    </div>
-                  )}
+                  {c.events.length > 0 && (() => {
+                    const evStyle = getEventColorStyle(c.events[0]);
+                    return (
+                      <div
+                        style={{
+                          fontSize: 10,
+                          background: evStyle.bg,
+                          color: evStyle.color,
+                          border: evStyle.border,
+                          borderRadius: 5,
+                          padding: "1px 3px",
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          maxWidth: "100%",
+                        }}
+                      >
+                        {c.events[0].title}
+                        {c.events.length > 1 ? `(${c.events.length})` : ""}
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })}
@@ -731,7 +755,24 @@ export default function CalendarApp({ onBackHome }) {
           </div>
 
           <div style={{ marginBottom: 14, paddingTop: 10, borderTop: "1px solid #f0f0f0" }}>
-            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>重要事件</div>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: 8,
+                marginBottom: 6,
+                flexWrap: "wrap",
+              }}
+            >
+              <span style={{ fontSize: 13, fontWeight: 600 }}>重要事件</span>
+              <span style={{ fontSize: 11, color: "#666" }}>
+                <span style={{ color: "#b02a5b", fontWeight: 600 }}>■ 粉色：我</span>
+                {" · "}
+                <span style={{ color: "#1d5fa7", fontWeight: 600 }}>■ 蓝色：小克</span>
+              </span>
+            </div>
+
             <form
               onSubmit={addEvent}
               style={{ display: "flex", gap: 6, flexWrap: "wrap", minWidth: 0 }}
@@ -759,33 +800,38 @@ export default function CalendarApp({ onBackHome }) {
             </form>
 
             <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
-              {(currentDay.events || []).map((ev, idx) => (
-                <div
-                  key={`${ev.title}-${idx}`}
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    gap: 8,
-                    background: "#f7f6f4",
-                    padding: "5px 8px",
-                    borderRadius: 8,
-                    fontSize: 12,
-                    minWidth: 0,
-                  }}
-                >
-                  <span style={{ wordBreak: "break-word", minWidth: 0 }}>
-                    [{ev.tag}] {ev.title}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => removeEvent(idx)}
-                    style={{ flexShrink: 0 }}
+              {(currentDay.events || []).map((ev, idx) => {
+                const evStyle = getEventColorStyle(ev);
+                return (
+                  <div
+                    key={`${ev.title}-${idx}`}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: 8,
+                      background: evStyle.bg,
+                      color: evStyle.color,
+                      border: evStyle.border,
+                      padding: "5px 8px",
+                      borderRadius: 8,
+                      fontSize: 12,
+                      minWidth: 0,
+                    }}
                   >
-                    删
-                  </button>
-                </div>
-              ))}
+                    <span style={{ wordBreak: "break-word", minWidth: 0 }}>
+                      [{evStyle.badge}·{ev.tag}] {ev.title}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removeEvent(idx)}
+                      style={{ flexShrink: 0 }}
+                    >
+                      删
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
