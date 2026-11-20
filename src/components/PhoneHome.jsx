@@ -1,6 +1,26 @@
 import { useEffect, useState } from 'react';
 import { ChatLineIcon, DiaryLineIcon } from './LineIcons';
 
+function CalendarLineIcon({ size = 26, color = '#ffffff' }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={color}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="3" y="4" width="18" height="18" rx="3" />
+      <line x1="16" y1="2" x2="16" y2="6" />
+      <line x1="8" y1="2" x2="8" y2="6" />
+      <line x1="3" y1="10" x2="21" y2="10" />
+    </svg>
+  );
+}
+
 function formatNow() {
   const now = new Date();
   const hh = String(now.getHours()).padStart(2, '0');
@@ -40,6 +60,13 @@ export default function PhoneHome({ onOpenApp }) {
       bg: 'linear-gradient(135deg, #f48fb1 0%, #c2185b 100%)',
       ready: true,
     },
+    {
+      id: 'calendar',
+      name: '日历',
+      renderIcon: () => <CalendarLineIcon size={26} color="#ffffff" />,
+      bg: 'linear-gradient(135deg, #f9a8c4 0%, #d6336c 100%)',
+      ready: true,
+    },
   ];
 
   return (
@@ -48,8 +75,7 @@ export default function PhoneHome({ onOpenApp }) {
         flex: 1,
         minHeight: 460,
         padding: '22px 18px 24px',
-        background:
-          'radial-gradient(circle at top, #fff0f6 0%, #fce0ea 58%, #f8cfe0 100%)',
+        background: 'radial-gradient(circle at top, #fff0f6 0%, #fce0ea 58%, #f8cfe0 100%)',
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'space-between',
