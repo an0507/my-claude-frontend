@@ -10,6 +10,10 @@ const MOODS = [
 
 const STORAGE_KEY = "my_claude_calendar_v2";
 
+export function notifyCalendarUpdated(detail) {
+  window.dispatchEvent(new CustomEvent("calendar:updated", { detail }));
+}
+
 function pad2(n) {
   return String(n).padStart(2, "0");
 }
@@ -95,7 +99,6 @@ function calcCycle(periodDays) {
   return { predicted, cycleLen, periodLen, lastStart: lastEp[0] };
 }
 
-// 兼容旧版单条 mood 字段，自动转为 moodLogs 数组
 function normalizeDayRecord(rawDay) {
   if (!rawDay) return { moodLogs: [], events: [] };
   if (Array.isArray(rawDay.moodLogs)) {
@@ -122,7 +125,8 @@ function normalizeDayRecord(rawDay) {
 
 function loadData() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem("my_claude_calendar_v1");
+    const raw =
+      localStorage.getItem(STORAGE_KEY) || localStorage.getItem("my_claude_calendar_v1");
     if (raw) {
       const parsed = JSON.parse(raw);
       const normalizedDays = {};
@@ -148,13 +152,11 @@ export default function CalendarApp({ onBackHome }) {
   );
   const [selectedKey, setSelectedKey] = useState(() => toDateKey(today));
 
-  // 新增或编辑心情表单状态
   const [editingLogId, setEditingLogId] = useState(null);
   const [moodDraft, setMoodDraft] = useState("happy");
   const [timeDraft, setTimeDraft] = useState(getCurrentTimeHHMM);
   const [noteDraft, setNoteDraft] = useState("");
 
-  // 重要事件表单状态
   const [eventInput, setEventInput] = useState("");
   const [eventTag, setEventTag] = useState("重要");
 
@@ -254,6 +256,7 @@ export default function CalendarApp({ onBackHome }) {
     });
 
     resetMoodForm();
+    notifyCalendarUpdated({ date: selectedKey, action: "mood" });
   };
 
   const handleStartEditLog = (log) => {
@@ -280,6 +283,7 @@ export default function CalendarApp({ onBackHome }) {
     if (editingLogId === logId) {
       resetMoodForm();
     }
+    notifyCalendarUpdated({ date: selectedKey, action: "mood" });
   };
 
   const addEvent = (e) => {
@@ -300,6 +304,7 @@ export default function CalendarApp({ onBackHome }) {
       };
     });
     setEventInput("");
+    notifyCalendarUpdated({ date: selectedKey, action: "event" });
   };
 
   const removeEvent = (idx) => {
@@ -316,6 +321,7 @@ export default function CalendarApp({ onBackHome }) {
         },
       };
     });
+    notifyCalendarUpdated({ date: selectedKey, action: "event" });
   };
 
   const togglePeriod = () => {
@@ -328,6 +334,7 @@ export default function CalendarApp({ onBackHome }) {
           : [...prev.periodDays, selectedKey],
       };
     });
+    notifyCalendarUpdated({ date: selectedKey, action: "period" });
   };
 
   const selectedDate = parseDateKey(selectedKey);
@@ -390,7 +397,6 @@ export default function CalendarApp({ onBackHome }) {
           alignItems: "start",
         }}
       >
-        {/* 日历网格 */}
         <div style={{ border: "1px solid #e6e2df", borderRadius: 12, padding: 10, background: "#fff" }}>
           <div
             style={{
@@ -486,13 +492,11 @@ export default function CalendarApp({ onBackHome }) {
           </div>
         </div>
 
-        {/* 当日详情 */}
         <div style={{ border: "1px solid #e6e2df", borderRadius: 12, padding: 12, background: "#fff" }}>
           <div style={{ fontWeight: 700, marginBottom: 10 }}>
             {selectedDate.getMonth() + 1}月{selectedDate.getDate()}日（周{"日一二三四五六"[selectedDate.getDay()]}）
           </div>
 
-          {/* 心情记录（支持多次 + 时间 + 修改/删除） */}
           <div style={{ marginBottom: 14 }}>
             <div
               style={{
@@ -565,7 +569,6 @@ export default function CalendarApp({ onBackHome }) {
               )}
             </div>
 
-            {/* 当天已记录的心情列表 */}
             <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
               {sortedMoodLogs.length === 0 ? (
                 <div style={{ fontSize: 12, color: "#888" }}>这一天还没有心情记录</div>
@@ -613,7 +616,6 @@ export default function CalendarApp({ onBackHome }) {
             </div>
           </div>
 
-          {/* 重要事件 */}
           <div style={{ marginBottom: 14, paddingTop: 10, borderTop: "1px solid #f0f0f0" }}>
             <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>重要事件</div>
             <form onSubmit={addEvent} style={{ display: "flex", gap: 6 }}>
@@ -658,7 +660,6 @@ export default function CalendarApp({ onBackHome }) {
             </div>
           </div>
 
-          {/* 生理期 */}
           <div style={{ paddingTop: 10, borderTop: "1px solid #f0f0f0" }}>
             <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>生理期</div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
