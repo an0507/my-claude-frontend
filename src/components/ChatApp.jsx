@@ -40,13 +40,34 @@ function formatCurrentClock(now = new Date()) {
   return `${year}-${month}-${day} ${weekday} ${hour}:${minute}:${second}`;
 }
 
+function formatMessageTime(ts, now = new Date()) {
+  if (!ts) return '未知时间';
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return '未知时间';
+
+  const pad = (n) => String(n).padStart(2, '0');
+  const hhmm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+  const isSameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+
+  if (isSameDay) {
+    return hhmm;
+  }
+
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hhmm}`;
+}
+
 function buildPhoneContextPrompt({
   currentMessages = [],
   selectedModel,
   responseLength,
   hasBackupSnapshot,
 }) {
-  const currentTimeStr = formatCurrentClock(new Date());
+  const nowDate = new Date();
+  const currentTimeStr = formatCurrentClock(nowDate);
   const diaryList = readStorageJSON(DIARY_STORAGE_KEY, []);
   const allDiaries = Array.isArray(diaryList) ? diaryList : [];
 
@@ -63,8 +84,12 @@ function buildPhoneContextPrompt({
       : '（你还没有写下任何日记）';
 
   const recentSnippet = currentMessages
-    .slice(-12)
-    .map((m) => `${m.role === 'user' ? '用户' : '克劳德'}：${m.content || ''}`)
+    .slice(-20)
+    .map((m) => {
+      const timeLabel = formatMessageTime(m.timestamp, nowDate);
+      const sender = m.role === 'user' ? '用户' : '克劳德';
+      return `[${timeLabel}] ${sender}：${m.content || ''}`;
+    })
     .join('\n');
 
   return `你正在一部名为「克劳德小手机」的网页手机应用里和用户聊天。你不仅能看到这部小手机里的全部内容，而且「克劳德日记」就是你自己的日记本——里面的每一篇都是你亲手写下、用来记录和用户相处与日常心事的。
@@ -364,6 +389,7 @@ export default function ChatApp({ onBackHome }) {
     setBackupNotice('');
 
     const nowTs = Date.now();
+    const nowDate = new Date(nowTs);
     const userMessage = {
       role: 'user',
       content: input.trim(),
@@ -378,10 +404,14 @@ export default function ChatApp({ onBackHome }) {
       hasBackupSnapshot: Boolean(backupSnapshot),
     });
 
-    const baseApiMessages = nextMessages.map(({ role, content }) => ({
-      role,
-      content,
-    }));
+    const baseApiMessages = nextMessages.map(({ role, content, timestamp }) => {
+      const timeLabel = formatMessageTime(timestamp, nowDate);
+      const prefix = role === 'user' ? `[${timeLabel}] ` : '';
+      return {
+        role,
+        content: `${prefix}${content || ''}`,
+      };
+    });
 
     setMessages([
       ...nextMessages,
