@@ -257,22 +257,22 @@ export default function CalendarApp({ onBackHome }) {
 
     setData((prev) => {
       const old = normalizeDayRecord(prev.days[selectedKey]);
-      let nextLogs;
-      if (editingLogId) {
-        nextLogs = old.moodLogs.map((item) =>
-          item.id === editingLogId
-            ? { ...item, moodId: moodDraft, time: cleanTime, note: cleanNote }
-            : item
-        );
-      } else {
-        const newEntry = {
-          id: `mood_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-          moodId: moodDraft,
-          time: cleanTime,
-          note: cleanNote,
-        };
-        nextLogs = [...old.moodLogs, newEntry];
-      }
+      const nextLogs = editingLogId
+        ? old.moodLogs.map((item) =>
+            item.id === editingLogId
+              ? { ...item, moodId: moodDraft, time: cleanTime, note: cleanNote }
+              : item
+          )
+        : [
+            ...old.moodLogs,
+            {
+              id: `mood_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+              moodId: moodDraft,
+              time: cleanTime,
+              note: cleanNote,
+            },
+          ];
+
       return {
         ...prev,
         days: {
@@ -286,7 +286,6 @@ export default function CalendarApp({ onBackHome }) {
     });
 
     resetMoodForm();
-    notifyCalendarUpdated({ date: selectedKey, action: "mood" });
   };
 
   const handleStartEditLog = (log) => {
@@ -698,11 +697,23 @@ export default function CalendarApp({ onBackHome }) {
             />
 
             <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
-              <button type="button" onClick={handleSaveMood}>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleSaveMood();
+                }}
+              >
                 {editingLogId ? "更新记录" : "添加心情"}
               </button>
               {editingLogId && (
-                <button type="button" onClick={resetMoodForm}>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    resetMoodForm();
+                  }}
+                >
                   取消编辑
                 </button>
               )}
