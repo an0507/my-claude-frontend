@@ -7,9 +7,8 @@ import {
 import { readStorageJSON, writeStorageJSON } from '../utils/storage';
 import { BackLineIcon, DiaryLineIcon } from './LineIcons';
 
-const DIARY_STORAGE_KEY = 'claude_diary_entries_v1';
-const DIARY_ATTEMPT_KEY = 'claude_diary_auto_attempts_v1';
-const AUTO_RETRY_COOLDOWN_MS = 15 * 60 * 1000;
+const DIARY_STORAGE_KEY =
+  STORAGE_KEYS.DIARY_ENTRIES || 'claude_diary_entries_v1';
 
 function pad2(n) {
   return String(n).padStart(2, '0');
@@ -27,11 +26,6 @@ function formatReadableDate(dateKey) {
   return `${Number(parts[1])}月${Number(parts[2])}日`;
 }
 
-/**
- * 计算“前一天 04:00 至 今天 04:00”的日记周期：
- * 在到达某个 `endAt`（某天 04:00）时，总结的是 `[endAt - 24h, endAt)` 这段内容，
- * 日记归属日期记为 `startAt`（前一天 04:00 所在的日期）。
- */
 function getPreviousCycleWindow(now = new Date()) {
   const todayFourAM = new Date(
     now.getFullYear(),
@@ -57,18 +51,6 @@ function getPreviousCycleWindow(now = new Date()) {
   };
 }
 
-function shouldSkipAutoCycle(attemptsMap, targetDateKey, nowMs) {
-  const record = attemptsMap?.[targetDateKey];
-  if (!record) return false;
-  if (record.status === 'done' || record.status === 'empty') {
-    return true;
-  }
-  if (record.status === 'error' && typeof record.lastErrorAt === 'number') {
-    return nowMs - record.lastErrorAt < AUTO_RETRY_COOLDOWN_MS;
-  }
-  return false;
-}
-
 export default function DiaryApp({ onBackHome }) {
   const [entries, setEntries] = useState(() =>
     readStorageJSON(DIARY_STORAGE_KEY, [])
@@ -80,10 +62,7 @@ export default function DiaryApp({ onBackHome }) {
   const [generating, setGenerating] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
 
-  const entriesRef = useRef(entries);
-  entriesRef.current = entries;
-
-  const generatingRef = useRef(generating);
+  const generatingRef = useRef(false);
   generatingRef.current = generating;
 
   useEffect(() => {
@@ -93,45 +72,15 @@ export default function DiaryApp({ onBackHome }) {
   const activeEntry =
     entries.find((item) => item.date === selectedDate) || entries[0] || null;
 
-  const runDiaryGeneration = useCallback(async ({ force = false } = {}) => {
+  const handleGenerateDiary = useCallback(async () => {
     if (generatingRef.current) return;
 
     const now = new Date();
-    const nowMs = now.getTime();
     const cycle = getPreviousCycleWindow(now);
-    const alreadyExists = entriesRef.current.some(
-      (item) => item.date === cycle.targetDateKey
-    );
-
-    const attemptsMap = readStorageJSON(DIARY_ATTEMPT_KEY, {});
-    const safeAttempts =
-      attemptsMap && typeof attemptsMap === 'object' ? attemptsMap : {};
-
-    if (!force) {
-      if (alreadyExists) {
-        if (safeAttempts[cycle.targetDateKey]?.status !== 'done') {
-          writeStorageJSON(DIARY_ATTEMPT_KEY, {
-            ...safeAttempts,
-            [cycle.targetDateKey]: { status: 'done', updatedAt: nowMs },
-          });
-        }
-        return;
-      }
-      if (shouldSkipAutoCycle(safeAttempts, cycle.targetDateKey, nowMs)) {
-        return;
-      }
-    }
 
     const allMessages = readStorageJSON(STORAGE_KEYS.MESSAGES, []);
     if (!Array.isArray(allMessages) || allMessages.length === 0) {
-      if (force) {
-        setStatusMsg('还没有聊天记录，先去「私聊」里聊几句吧。');
-      } else {
-        writeStorageJSON(DIARY_ATTEMPT_KEY, {
-          ...safeAttempts,
-          [cycle.targetDateKey]: { status: 'empty', updatedAt: nowMs },
-        });
-      }
+      setStatusMsg('还没有聊天记录，先去「私聊」里聊几句吧。');
       return;
     }
 
@@ -150,13 +99,6 @@ export default function DiaryApp({ onBackHome }) {
     }
 
     if (scopedMessages.length === 0) {
-      if (!force) {
-        writeStorageJSON(DIARY_ATTEMPT_KEY, {
-          ...safeAttempts,
-          [cycle.targetDateKey]: { status: 'empty', updatedAt: nowMs },
-        });
-        return;
-      }
       scopedMessages = allMessages.slice(-30);
     } else {
       scopedMessages = scopedMessages.slice(-40);
@@ -263,41 +205,15 @@ ${transcript}`,
         );
       });
 
-      const latestAttempts = readStorageJSON(DIARY_ATTEMPT_KEY, {});
-      writeStorageJSON(DIARY_ATTEMPT_KEY, {
-        ...(latestAttempts && typeof latestAttempts === 'object'
-          ? latestAttempts
-          : {}),
-        [cycle.targetDateKey]: { status: 'done', updatedAt: Date.now() },
-      });
-
       setSelectedDate(cycle.targetDateKey);
       setStatusMsg(`已存入 ${formatReadableDate(cycle.targetDateKey)} 的日记`);
     } catch (err) {
-      const latestAttempts = readStorageJSON(DIARY_ATTEMPT_KEY, {});
-      writeStorageJSON(DIARY_ATTEMPT_KEY, {
-        ...(latestAttempts && typeof latestAttempts === 'object'
-          ? latestAttempts
-          : {}),
-        [cycle.targetDateKey]: {
-          status: 'error',
-          lastErrorAt: Date.now(),
-        },
-      });
       setStatusMsg(err?.message || '生成失败，请稍后再试');
     } finally {
       generatingRef.current = false;
       setGenerating(false);
     }
   }, []);
-
-  useEffect(() => {
-    runDiaryGeneration({ force: false });
-    const timer = setInterval(() => {
-      runDiaryGeneration({ force: false });
-    }, 60 * 1000);
-    return () => clearInterval(timer);
-  }, [runDiaryGeneration]);
 
   function handleDeleteEntry(dateToDelete) {
     setEntries((prev) => {
@@ -322,7 +238,6 @@ ${transcript}`,
         background: '#fff9fb',
       }}
     >
-      {/* 顶部栏 */}
       <div
         style={{
           display: 'flex',
@@ -371,7 +286,7 @@ ${transcript}`,
 
         <button
           type="button"
-          onClick={() => runDiaryGeneration({ force: true })}
+          onClick={handleGenerateDiary}
           disabled={generating}
           style={{
             padding: '6px 12px',
@@ -389,7 +304,6 @@ ${transcript}`,
         </button>
       </div>
 
-      {/* 周期说明条 */}
       <div
         style={{
           padding: '6px 14px',
@@ -399,11 +313,9 @@ ${transcript}`,
           borderBottom: '1px solid #fce4ec',
         }}
       >
-        每日 04:00 自动总结前一日 04:00 ～ 当日 04:00 聊天（当前周期：
-        {previewCycle.windowLabel}）
+        按 04:00 周期整理聊天记录（当前周期：{previewCycle.windowLabel}）
       </div>
 
-      {/* 状态提示 */}
       {statusMsg && (
         <div
           style={{
@@ -418,7 +330,6 @@ ${transcript}`,
         </div>
       )}
 
-      {/* 日期切换条 */}
       {entries.length > 0 && (
         <div
           style={{
@@ -456,7 +367,6 @@ ${transcript}`,
         </div>
       )}
 
-      {/* 日记阅读区 */}
       <div
         style={{
           flex: 1,
@@ -541,8 +451,7 @@ ${transcript}`,
               还没有克劳德日记
             </div>
             <div style={{ fontSize: 13, lineHeight: 1.6 }}>
-              每天 04:00 会自动总结前一天 04:00 至当天 04:00
-              的聊天内容；也可以点右上角「立即生成日记」手动写一篇。
+              可以点右上角「立即生成日记」，根据前一个 04:00 周期的聊天记录写一篇日记。
             </div>
           </div>
         )}
