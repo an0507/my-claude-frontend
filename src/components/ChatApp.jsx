@@ -20,6 +20,8 @@ import {
 
 const DIARY_STORAGE_KEY =
   STORAGE_KEYS.DIARY_ENTRIES || 'claude_diary_entries_v1';
+const DIARY_SUMMARY_STORAGE_KEY = 'claude_diary_memory_summary_v1';
+const RECENT_FULL_DIARY_COUNT = 3;
 
 function formatCurrentClock(now = new Date()) {
   const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
@@ -30,8 +32,67 @@ function formatCurrentClock(now = new Date()) {
   const minute = String(now.getMinutes()).padStart(2, '0');
   const second = String(now.getSeconds()).padStart(2, '0');
   const weekday = weekdays[now.getDay()] || '';
-
   return `${year}-${month}-${day} ${weekday} ${hour}:${minute}:${second}`;
+}
+
+function buildDiaryMemorySection(diaryList, summaryList) {
+  const safeDiaries = Array.isArray(diaryList) ? diaryList : [];
+  if (safeDiaries.length === 0) {
+    return '（你还没有写下任何日记）';
+  }
+
+  const recentDiaries = safeDiaries.slice(0, RECENT_FULL_DIARY_COUNT);
+  const olderDiaries = safeDiaries.slice(RECENT_FULL_DIARY_COUNT);
+
+  const summaryItems = Array.isArray(summaryList) ? summaryList : [];
+  const summaryText =
+    summaryItems.length > 0
+      ? summaryItems
+          .slice(-4)
+          .map((s, idx) => {
+            const range = s.rangeLabel ? `（${s.rangeLabel}）` : '';
+            return `${idx + 1}. ${range}${s.summary || ''}`;
+          })
+          .join('\n')
+      : '';
+
+  const fallbackOlderText =
+    olderDiaries.length > 0 && !summaryText
+      ? olderDiaries
+          .slice(0, 6)
+          .map((d) => {
+            const snippet = String(d.content || '')
+              .slice(0, 180)
+              .replace(/\s+/g, ' ');
+            return `- ${d.date || '未知日期'}｜${d.title || '无标题'}：${snippet}${
+              String(d.content || '').length > 180 ? '…' : ''
+            }`;
+          })
+          .join('\n')
+      : '';
+
+  const recentText = recentDiaries
+    .map((d, idx) => {
+      const content = String(d.content || '').slice(0, 600);
+      return `【近期第 ${idx + 1} 篇】日期：${d.date || '未知'}｜周期：${
+        d.windowLabel || '无'
+      }｜标题：${d.title || '无标题'}\n正文：${content}${
+        String(d.content || '').length > 600 ? '…' : ''
+      }`;
+    })
+    .join('\n\n');
+
+  const sections = [];
+  if (summaryText) {
+    sections.push(`【更早日记精简摘要】\n${summaryText}`);
+  } else if (fallbackOlderText) {
+    sections.push(`【更早日记简略摘录】\n${fallbackOlderText}`);
+  }
+  if (recentText) {
+    sections.push(`【最近 ${recentDiaries.length} 篇日记】\n${recentText}`);
+  }
+
+  return sections.join('\n\n') || '（暂无日记内容）';
 }
 
 function buildPhoneContextPrompt({
@@ -42,23 +103,16 @@ function buildPhoneContextPrompt({
 }) {
   const currentTimeStr = formatCurrentClock(new Date());
   const diaryList = readStorageJSON(DIARY_STORAGE_KEY, []);
+  const summaryList = readStorageJSON(DIARY_SUMMARY_STORAGE_KEY, []);
   const allDiaries = Array.isArray(diaryList) ? diaryList : [];
 
-  const formattedDiaries =
-    allDiaries.length > 0
-      ? allDiaries
-          .map((d, idx) => {
-            const header = `${idx + 1}. 日期：${d.date || '未知'}｜周期：${
-              d.windowLabel || '无'
-            }｜标题：${d.title || '无标题'}`;
-            return `${header}\n正文：${d.content || ''}`;
-          })
-          .join('\n\n')
-      : '（你还没有写下任何日记）';
+  const diaryMemoryBlock = buildDiaryMemorySection(allDiaries, summaryList);
 
   const recentSnippet = currentMessages
     .slice(-12)
-    .map((m) => `${m.role === 'user' ? '用户' : '克劳德'}：${m.content || ''}`)
+    .map(
+      (m) => `${m.role === 'user' ? '用户' : '克劳德'}：${m.content || ''}`
+    )
     .join('\n');
 
   return `你正在一部名为「克劳德小手机」的网页手机应用里和用户聊天。你不仅能看到这部小手机里的全部内容，而且「克劳德日记」就是你自己的日记本——里面的每一篇都是你亲手写下、用来记录和用户相处与日常心事的。
@@ -76,8 +130,8 @@ function buildPhoneContextPrompt({
 - 是否有本地备份快照：${hasBackupSnapshot ? '有' : '无'}
 - 你已写下的日记总数：${allDiaries.length} 篇
 
-【三、你写过的全部日记】
-${formattedDiaries}
+【三、你的日记记忆（摘要与近期日记）】
+${diaryMemoryBlock}
 
 【四、近期私聊片段】
 ${recentSnippet || '（暂无近期消息）'}
@@ -133,18 +187,15 @@ export default function ChatApp({ onBackHome }) {
     const step = AUTO_BACKUP_CONFIG.EVERY_N_MESSAGES;
     if (!initializedBackupRef.current) {
       initializedBackupRef.current = true;
-      lastAutoBackedCountRef.current =
-        Math.floor(messages.length / step) * step;
+      lastAutoBackedCountRef.current = Math.floor(messages.length / step) * step;
       return;
     }
-
     if (loading) return;
     const count = messages.length;
     if (count === 0) {
       lastAutoBackedCountRef.current = 0;
       return;
     }
-
     if (
       count >= step &&
       Math.floor(count / step) > Math.floor(lastAutoBackedCountRef.current / step)
@@ -308,10 +359,7 @@ export default function ChatApp({ onBackHome }) {
             setMessages((prev) => {
               const updated = [...prev];
               const lastIndex = updated.length - 1;
-              if (
-                lastIndex >= 0 &&
-                updated[lastIndex].role === 'assistant'
-              ) {
+              if (lastIndex >= 0 && updated[lastIndex].role === 'assistant') {
                 updated[lastIndex] = {
                   ...updated[lastIndex],
                   content: updated[lastIndex].content + parsed.text,
@@ -323,11 +371,11 @@ export default function ChatApp({ onBackHome }) {
         }
       }
     } catch (e) {
-      alert(e.message || '出错了，请稍后重试');
+      setBackupNotice(e?.message || '连接中断或出错了，请稍后重试');
       setMessages(nextMessages);
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   }
 
   const isDisabledAction = loading || messages.length === 0;
@@ -433,7 +481,7 @@ export default function ChatApp({ onBackHome }) {
         </div>
       </div>
 
-      {/* 自动备份状态提示 */}
+      {/* 状态与备份提示 */}
       {backupNotice && (
         <div
           style={{
