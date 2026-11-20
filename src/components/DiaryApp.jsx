@@ -22,6 +22,12 @@ function formatDateKey(dateObj) {
   )}`;
 }
 
+function formatNowStamp(now = new Date()) {
+  return `${formatDateKey(now)} ${pad2(now.getHours())}:${pad2(
+    now.getMinutes()
+  )}`;
+}
+
 function formatReadableDate(dateKey) {
   const parts = String(dateKey || '').split('-');
   if (parts.length !== 3) return dateKey;
@@ -57,6 +63,14 @@ function sortChronological(list) {
   return [...(Array.isArray(list) ? list : [])].sort((a, b) =>
     String(a.date || '').localeCompare(String(b.date || ''))
   );
+}
+
+function formatCommentsForPrompt(comments) {
+  if (!Array.isArray(comments) || comments.length === 0) return '';
+  const lines = comments.map(
+    (c) => `  - [${c.time || ''}] 晓菲：${c.text || ''}`
+  );
+  return `\n日记下方留言：\n${lines.join('\n')}`;
 }
 
 async function fetchStreamText(payload) {
@@ -113,6 +127,7 @@ export default function DiaryApp({ onBackHome }) {
   });
   const [generating, setGenerating] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
+  const [commentDraft, setCommentDraft] = useState('');
 
   const busyRef = useRef(false);
   busyRef.current = generating;
@@ -125,6 +140,10 @@ export default function DiaryApp({ onBackHome }) {
     writeStorageJSON(DIARY_SUMMARIES_KEY, summaries);
   }, [summaries]);
 
+  useEffect(() => {
+    setCommentDraft('');
+  }, [selectedDate]);
+
   const activeEntry =
     entries.find((item) => item.date === selectedDate) || entries[0] || null;
 
@@ -132,7 +151,6 @@ export default function DiaryApp({ onBackHome }) {
     const chrono = sortChronological(allEntries);
     const completedBatchCount = Math.floor(chrono.length / BATCH_SIZE);
 
-    // 保留合法的已完成批次摘要（若日记被删导致批次减少，则裁掉多余批次）
     const validSummaries = (Array.isArray(currentSummaries) ? currentSummaries : [])
       .filter((s) => typeof s.batchIndex === 'number' && s.batchIndex <= completedBatchCount)
       .sort((a, b) => a.batchIndex - b.batchIndex);
@@ -163,7 +181,7 @@ export default function DiaryApp({ onBackHome }) {
       const batchText = batchSlice
         .map(
           (d, idx) =>
-            `第${start + idx + 1}篇（${d.date}｜${d.title || '无标题'}）：\n${d.content || ''}`
+            `第${start + idx + 1}篇（${d.date}｜${d.title || '无标题'}）：\n${d.content || ''}${formatCommentsForPrompt(d.comments)}`
         )
         .join('\n\n');
 
@@ -280,11 +298,18 @@ ${transcript}`,
       const content =
         lines.length > 1 ? lines.slice(1).join('\n\n').trim() : trimmed;
 
+      const existingSameDay = entries.find(
+        (item) => item.date === cycle.targetDateKey
+      );
+
       const newEntry = {
         date: cycle.targetDateKey,
         windowLabel: cycle.windowLabel,
         title,
         content,
+        comments: Array.isArray(existingSameDay?.comments)
+          ? existingSameDay.comments
+          : [],
         updatedAt: new Date().toISOString(),
       };
 
@@ -314,6 +339,47 @@ ${transcript}`,
     }
   }, [entries, summaries, syncBatchSummaries]);
 
+  function handleAddComment(e) {
+    e.preventDefault();
+    if (!activeEntry) return;
+    const text = commentDraft.trim();
+    if (!text) return;
+
+    const newComment = {
+      id: `cmt_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      time: formatNowStamp(new Date()),
+      text,
+    };
+
+    setEntries((prev) =>
+      prev.map((item) => {
+        if (item.date !== activeEntry.date) return item;
+        const oldComments = Array.isArray(item.comments) ? item.comments : [];
+        return {
+          ...item,
+          comments: [...oldComments, newComment],
+        };
+      })
+    );
+    setCommentDraft('');
+    setStatusMsg('已留下日记批注');
+  }
+
+  function handleDeleteComment(commentId) {
+    if (!activeEntry) return;
+    setEntries((prev) =>
+      prev.map((item) => {
+        if (item.date !== activeEntry.date) return item;
+        const oldComments = Array.isArray(item.comments) ? item.comments : [];
+        return {
+          ...item,
+          comments: oldComments.filter((c) => c.id !== commentId),
+        };
+      })
+    );
+    setStatusMsg('已删除该条留言');
+  }
+
   function handleDeleteEntry(dateToDelete) {
     const nextEntries = entries.filter((item) => item.date !== dateToDelete);
     const completedBatchCount = Math.floor(nextEntries.length / BATCH_SIZE);
@@ -332,6 +398,9 @@ ${transcript}`,
   }
 
   const previewCycle = getPreviousCycleWindow();
+  const activeComments = Array.isArray(activeEntry?.comments)
+    ? activeEntry.comments
+    : [];
 
   return (
     <div
@@ -536,6 +605,128 @@ ${transcript}`,
               }}
             >
               {activeEntry.content}
+            </div>
+
+            {/* 日记下方留言区 */}
+            <div
+              style={{
+                marginTop: 16,
+                paddingTop: 12,
+                borderTop: '1px dashed #f2cedb',
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: '#8c6a76',
+                  marginBottom: 8,
+                }}
+              >
+                日记留言（{activeComments.length}）
+              </div>
+
+              {activeComments.length > 0 && (
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 6,
+                    marginBottom: 10,
+                  }}
+                >
+                  {activeComments.map((cmt) => (
+                    <div
+                      key={cmt.id}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'flex-start',
+                        gap: 8,
+                        padding: '7px 10px',
+                        borderRadius: 10,
+                        background: '#fff7fa',
+                        border: '1px solid #fce4ec',
+                        fontSize: 13,
+                        lineHeight: 1.5,
+                        color: '#3b232c',
+                      }}
+                    >
+                      <div style={{ minWidth: 0, wordBreak: 'break-word' }}>
+                        <span style={{ fontWeight: 600, color: '#be185d' }}>
+                          晓菲
+                        </span>
+                        {cmt.time && (
+                          <span
+                            style={{
+                              fontSize: 11,
+                              color: '#9a7b86',
+                              marginLeft: 6,
+                            }}
+                          >
+                            {cmt.time}
+                          </span>
+                        )}
+                        <span>：{cmt.text}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteComment(cmt.id)}
+                        style={{
+                          border: 'none',
+                          background: 'transparent',
+                          color: '#b07b8e',
+                          fontSize: 11.5,
+                          cursor: 'pointer',
+                          flexShrink: 0,
+                          padding: 0,
+                        }}
+                      >
+                        删除
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <form
+                onSubmit={handleAddComment}
+                style={{ display: 'flex', gap: 8 }}
+              >
+                <input
+                  type="text"
+                  value={commentDraft}
+                  onChange={(e) => setCommentDraft(e.target.value)}
+                  placeholder="在日记下面留句话或颜文字…"
+                  style={{
+                    flex: 1,
+                    padding: '7px 11px',
+                    fontSize: 13,
+                    borderRadius: 10,
+                    border: '1px solid #f0cedb',
+                    background: '#fffdfd',
+                    color: '#2d1e24',
+                    outline: 'none',
+                  }}
+                />
+                <button
+                  type="submit"
+                  disabled={!commentDraft.trim()}
+                  style={{
+                    padding: '0 14px',
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    borderRadius: 10,
+                    border: 'none',
+                    background: commentDraft.trim() ? '#e57399' : '#f5c6d6',
+                    color: '#ffffff',
+                    cursor: commentDraft.trim() ? 'pointer' : 'not-allowed',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  留言
+                </button>
+              </form>
             </div>
           </article>
         ) : (
