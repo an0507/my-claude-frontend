@@ -36,6 +36,65 @@ function toSafeArray(val) {
   return Array.isArray(val) ? val : [];
 }
 
+function recoverLegacyMessages() {
+  try {
+    // 1. 优先读取标准备份快照
+    const snap = readBackupSnapshot(STORAGE_KEYS.MESSAGES_BACKUP);
+    if (snap && Array.isArray(snap.messages) && snap.messages.length > 0) {
+      return snap.messages;
+    }
+
+    // 2. 兼容此前 STORAGE_KEYS.MESSAGES 缺失时写入的 "undefined" 键
+    const rawUndefined = window.localStorage.getItem('undefined');
+    if (rawUndefined) {
+      const parsed = JSON.parse(rawUndefined);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+      if (
+        parsed &&
+        Array.isArray(parsed.messages) &&
+        parsed.messages.length > 0
+      ) {
+        return parsed.messages;
+      }
+    }
+
+    // 3. 兼容旧版多会话存储 claude_conversations_v1
+    const convs = readStorageJSON(STORAGE_KEYS.CONVERSATIONS, []);
+    if (Array.isArray(convs) && convs.length > 0) {
+      const activeId = readStorageJSON(
+        STORAGE_KEYS.ACTIVE_CONVERSATION_ID,
+        null
+      );
+      const target = convs.find((c) => c?.id === activeId) || convs[0];
+      if (
+        target &&
+        Array.isArray(target.messages) &&
+        target.messages.length > 0
+      ) {
+        return target.messages;
+      }
+    }
+
+    // 4. 兼容旧版自动备份列表 claude_auto_backups_v1
+    const autoBackups = readStorageJSON(AUTO_BACKUP_CONFIG.STORAGE_KEY, []);
+    if (Array.isArray(autoBackups) && autoBackups.length > 0) {
+      const latest = autoBackups[autoBackups.length - 1];
+      if (
+        latest &&
+        Array.isArray(latest.messages) &&
+        latest.messages.length > 0
+      ) {
+        return latest.messages;
+      }
+    }
+  } catch (err) {
+    console.warn('[storage] 扫描旧记录失败:', err);
+  }
+  return [];
+}
+
 function splitMultiBubbles(text = '') {
   return String(text || '')
     .split(/\[\[\s*分句\s*\]\]/g)
@@ -211,8 +270,7 @@ export default function ChatApp({ onBackHome }) {
   const [messages, setMessages] = useState(() => {
     const primary = toSafeArray(readStorageJSON(STORAGE_KEYS.MESSAGES, []));
     if (primary.length > 0) return primary;
-    const snap = readBackupSnapshot(STORAGE_KEYS.MESSAGES_BACKUP);
-    return snap && Array.isArray(snap.messages) ? snap.messages : [];
+    return recoverLegacyMessages();
   });
   const [selectedModel, setSelectedModel] = useState(() => {
     const saved = readStorageJSON(STORAGE_KEYS.SELECTED_MODEL, null);
