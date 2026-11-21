@@ -18,10 +18,11 @@ export function writeStorageJSON(key, value) {
 }
 
 export function exportMessagesAsTxt(messages, filename = 'chat-history.txt') {
-  const content = messages
+  const safeList = Array.isArray(messages) ? messages : [];
+  const content = safeList
     .map((msg) => {
-      const roleLabel = msg.role === 'user' ? '我' : '本体';
-      return `[${roleLabel}]\n${msg.content}\n`;
+      const roleLabel = msg?.role === 'user' ? '我' : '本体';
+      return `[${roleLabel}]\n${msg?.content ?? ''}\n`;
     })
     .join('\n---\n\n');
 
@@ -49,6 +50,18 @@ export function readBackupSnapshot(backupKey) {
     return null;
   }
   return data;
+}
+
+export function exportBackupSnapshotAsTxt(
+  backupKey,
+  filename = 'claude-backup-snapshot.txt'
+) {
+  const snapshot = readBackupSnapshot(backupKey);
+  if (!snapshot || !Array.isArray(snapshot.messages) || snapshot.messages.length === 0) {
+    return false;
+  }
+  exportMessagesAsTxt(snapshot.messages, filename);
+  return true;
 }
 
 export function formatBackupFilename(prefix = 'claude-auto-backup') {
