@@ -1,8 +1,69 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import ChatApp from './components/ChatApp';
 import DiaryApp from './components/DiaryApp';
 import PhoneHome from './components/PhoneHome';
 import CalendarApp from './components/CalendarApp';
+
+class ViewErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  componentDidCatch(error, info) {
+    console.error('[ViewErrorBoundary]', error, info);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div
+          style={{
+            padding: 20,
+            margin: 16,
+            borderRadius: 16,
+            background: '#fff0f5',
+            border: '1px solid #f3c2d2',
+            color: '#6b1d3a',
+            fontSize: 13,
+            lineHeight: 1.6,
+          }}
+        >
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>
+            页面渲染出错了（已拦截白屏）
+          </div>
+          <div style={{ wordBreak: 'break-word', marginBottom: 12 }}>
+            {this.state.error?.message || String(this.state.error)}
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              this.setState({ error: null });
+              this.props.onReset?.();
+            }}
+            style={{
+              padding: '6px 14px',
+              borderRadius: 999,
+              border: '1px solid #e57399',
+              background: '#ffffff',
+              color: '#be185d',
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            返回桌面重试
+          </button>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 
 export default function App() {
   const [activeApp, setActiveApp] = useState('home');
@@ -35,16 +96,20 @@ export default function App() {
           overflow: 'hidden',
         }}
       >
-        {/* 当前打开的页面 */}
-        {activeApp === 'home' ? (
-          <PhoneHome onOpenApp={(appId) => setActiveApp(appId)} />
-        ) : activeApp === 'diary' ? (
-          <DiaryApp onBackHome={() => setActiveApp('home')} />
-        ) : activeApp === 'calendar' ? (
-          <CalendarApp onBackHome={() => setActiveApp('home')} />
-        ) : (
-          <ChatApp onBackHome={() => setActiveApp('home')} />
-        )}
+        <ViewErrorBoundary
+          key={activeApp}
+          onReset={() => setActiveApp('home')}
+        >
+          {activeApp === 'home' ? (
+            <PhoneHome onOpenApp={(appId) => setActiveApp(appId)} />
+          ) : activeApp === 'diary' ? (
+            <DiaryApp onBackHome={() => setActiveApp('home')} />
+          ) : activeApp === 'calendar' ? (
+            <CalendarApp onBackHome={() => setActiveApp('home')} />
+          ) : (
+            <ChatApp onBackHome={() => setActiveApp('home')} />
+          )}
+        </ViewErrorBoundary>
 
         {/* 底部 Home 导航条 */}
         <div
