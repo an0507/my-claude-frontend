@@ -208,9 +208,12 @@ async function streamChatOnce({
 }
 
 export default function ChatApp({ onBackHome }) {
-  const [messages, setMessages] = useState(() =>
-    toSafeArray(readStorageJSON(STORAGE_KEYS.MESSAGES, []))
-  );
+  const [messages, setMessages] = useState(() => {
+    const primary = toSafeArray(readStorageJSON(STORAGE_KEYS.MESSAGES, []));
+    if (primary.length > 0) return primary;
+    const snap = readBackupSnapshot(STORAGE_KEYS.MESSAGES_BACKUP);
+    return snap && Array.isArray(snap.messages) ? snap.messages : [];
+  });
   const [selectedModel, setSelectedModel] = useState(() => {
     const saved = readStorageJSON(STORAGE_KEYS.SELECTED_MODEL, null);
     return typeof saved === 'string' && saved ? saved : DEFAULT_MODEL;
@@ -258,15 +261,15 @@ export default function ChatApp({ onBackHome }) {
 
   useEffect(() => {
     const list = toSafeArray(messages);
-    writeStorageJSON(STORAGE_KEYS.MESSAGES, list);
     if (list.length > 0) {
+      writeStorageJSON(STORAGE_KEYS.MESSAGES, list);
       writeBackupSnapshot(STORAGE_KEYS.MESSAGES_BACKUP, list);
     }
   }, [messages]);
 
   useEffect(() => {
     if (!AUTO_BACKUP_CONFIG.ENABLED) return;
-    const step = AUTO_BACKUP_CONFIG.EVERY_N_MESSAGES;
+    const step = AUTO_BACKUP_CONFIG.EVERY_N_MESSAGES || 40;
     const list = toSafeArray(messages);
     if (!initializedBackupRef.current) {
       initializedBackupRef.current = true;
@@ -304,7 +307,10 @@ export default function ChatApp({ onBackHome }) {
       if (e.key === STORAGE_KEYS.MESSAGES) {
         try {
           const parsed = e.newValue ? JSON.parse(e.newValue) : [];
-          setMessages(toSafeArray(parsed));
+          const nextList = toSafeArray(parsed);
+          if (nextList.length > 0) {
+            setMessages(nextList);
+          }
         } catch {
           // 忽略解析异常
         }
@@ -403,10 +409,15 @@ export default function ChatApp({ onBackHome }) {
   }
 
   function restoreBackup() {
-    if (loading || !Array.isArray(backupSnapshot?.messages) || !backupSnapshot.messages.length) {
+    if (
+      loading ||
+      !Array.isArray(backupSnapshot?.messages) ||
+      !backupSnapshot.messages.length
+    ) {
       return;
     }
     setMessages(backupSnapshot.messages);
+    setBackupNotice(`已恢复上次备份（${backupSnapshot.messages.length} 条）`);
   }
 
   function handleExportMessages() {
