@@ -32,6 +32,10 @@ const DIARY_STORAGE_KEY =
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+function toSafeArray(val) {
+  return Array.isArray(val) ? val : [];
+}
+
 function splitMultiBubbles(text = '') {
   return String(text || '')
     .split(/\[\[\s*分句\s*\]\]/g)
@@ -124,11 +128,12 @@ function buildDynamicTurnContext({
   hasBackupSnapshot,
   nowDate = new Date(),
 }) {
+  const safeCurrent = toSafeArray(currentMessages);
   const currentTimeStr = formatCurrentClock(nowDate);
   const diaryList = readStorageJSON(DIARY_STORAGE_KEY, []);
   const allDiaries = Array.isArray(diaryList) ? diaryList : [];
 
-  const recentSnippet = currentMessages
+  const recentSnippet = safeCurrent
     .slice(-12)
     .map((m) => {
       const timeLabel = formatMessageTime(m.timestamp, nowDate);
@@ -141,7 +146,7 @@ function buildDynamicTurnContext({
 - 当前现实时间（与主页时钟一致）：${currentTimeStr}
 - 当前选用模型：${selectedModel}
 - 当前回复长度设置：${responseLength}
-- 当前私聊消息总数：${currentMessages.length} 条
+- 当前私聊消息总数：${safeCurrent.length} 条
 - 是否有本地备份快照：${hasBackupSnapshot ? '有' : '无'}
 - 你已写下的日记总数：${allDiaries.length} 篇
 
@@ -204,7 +209,7 @@ async function streamChatOnce({
 
 export default function ChatApp({ onBackHome }) {
   const [messages, setMessages] = useState(() =>
-    readStorageJSON(STORAGE_KEYS.MESSAGES, [])
+    toSafeArray(readStorageJSON(STORAGE_KEYS.MESSAGES, []))
   );
   const [selectedModel, setSelectedModel] = useState(() => {
     const saved = readStorageJSON(STORAGE_KEYS.SELECTED_MODEL, null);
@@ -225,12 +230,14 @@ export default function ChatApp({ onBackHome }) {
   const [loading, setLoading] = useState(false);
   const [backupNotice, setBackupNotice] = useState('');
 
+  const safeMessages = toSafeArray(messages);
+
   const bottomRef = useRef(null);
   const modelMenuRef = useRef(null);
   const lengthMenuRef = useRef(null);
   const lastAutoBackedCountRef = useRef(0);
   const initializedBackupRef = useRef(false);
-  const messagesRef = useRef(messages);
+  const messagesRef = useRef(safeMessages);
   const selectedModelRef = useRef(selectedModel);
   const currentLengthObjRef = useRef(null);
   const backupSnapshotRef = useRef(null);
@@ -243,31 +250,32 @@ export default function ChatApp({ onBackHome }) {
     RESPONSE_LENGTH_OPTIONS[1];
   const backupSnapshot = readBackupSnapshot(STORAGE_KEYS.MESSAGES_BACKUP);
 
-  messagesRef.current = messages;
+  messagesRef.current = safeMessages;
   selectedModelRef.current = selectedModel;
   currentLengthObjRef.current = currentLengthObj;
   backupSnapshotRef.current = backupSnapshot;
   loadingRef.current = loading;
 
   useEffect(() => {
-    writeStorageJSON(STORAGE_KEYS.MESSAGES, messages);
-    if (messages.length > 0) {
-      writeBackupSnapshot(STORAGE_KEYS.MESSAGES_BACKUP, messages);
+    const list = toSafeArray(messages);
+    writeStorageJSON(STORAGE_KEYS.MESSAGES, list);
+    if (list.length > 0) {
+      writeBackupSnapshot(STORAGE_KEYS.MESSAGES_BACKUP, list);
     }
   }, [messages]);
 
   useEffect(() => {
     if (!AUTO_BACKUP_CONFIG.ENABLED) return;
     const step = AUTO_BACKUP_CONFIG.EVERY_N_MESSAGES;
+    const list = toSafeArray(messages);
     if (!initializedBackupRef.current) {
       initializedBackupRef.current = true;
-      lastAutoBackedCountRef.current =
-        Math.floor(messages.length / step) * step;
+      lastAutoBackedCountRef.current = Math.floor(list.length / step) * step;
       return;
     }
 
     if (loading) return;
-    const count = messages.length;
+    const count = list.length;
     if (count === 0) {
       lastAutoBackedCountRef.current = 0;
       return;
@@ -278,7 +286,7 @@ export default function ChatApp({ onBackHome }) {
       Math.floor(count / step) > Math.floor(lastAutoBackedCountRef.current / step)
     ) {
       lastAutoBackedCountRef.current = count;
-      exportMessagesAsTxt(messages, formatBackupFilename());
+      exportMessagesAsTxt(list, formatBackupFilename());
       setBackupNotice(`已自动导出备份（累计 ${count} 条消息）`);
     }
   }, [messages, loading]);
@@ -295,7 +303,8 @@ export default function ChatApp({ onBackHome }) {
     function handleStorageChange(e) {
       if (e.key === STORAGE_KEYS.MESSAGES) {
         try {
-          setMessages(e.newValue ? JSON.parse(e.newValue) : []);
+          const parsed = e.newValue ? JSON.parse(e.newValue) : [];
+          setMessages(toSafeArray(parsed));
         } catch {
           // 忽略解析异常
         }
@@ -308,7 +317,10 @@ export default function ChatApp({ onBackHome }) {
   useEffect(() => {
     const cleanup = attachProactiveCalendarWatcher({
       getMessages: () =>
-        messagesRef.current.map(({ role, content }) => ({ role, content })),
+        toSafeArray(messagesRef.current).map(({ role, content }) => ({
+          role,
+          content,
+        })),
       getBaseSystemPrompt: () => buildStableSystemPrompt(),
       streamChatOnce: async (msgs, sys, onChunk) => {
         return await streamChatOnce({
@@ -333,7 +345,7 @@ export default function ChatApp({ onBackHome }) {
             await sleep(500);
           }
           setMessages((prev) => [
-            ...prev,
+            ...toSafeArray(prev),
             {
               role: 'assistant',
               content: list[idx],
@@ -350,7 +362,7 @@ export default function ChatApp({ onBackHome }) {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, loading]);
+  }, [safeMessages, loading]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -378,7 +390,7 @@ export default function ChatApp({ onBackHome }) {
   }, [lengthMenuOpen]);
 
   function clearMessages() {
-    if (loading || messages.length === 0) return;
+    if (loading || safeMessages.length === 0) return;
     setMessages([]);
     setBackupNotice('');
     lastAutoBackedCountRef.current = 0;
@@ -391,19 +403,21 @@ export default function ChatApp({ onBackHome }) {
   }
 
   function restoreBackup() {
-    if (loading || !backupSnapshot?.messages?.length) return;
+    if (loading || !Array.isArray(backupSnapshot?.messages) || !backupSnapshot.messages.length) {
+      return;
+    }
     setMessages(backupSnapshot.messages);
   }
 
   function handleExportMessages() {
-    if (loading || messages.length === 0) return;
-    exportMessagesAsTxt(messages);
+    if (loading || safeMessages.length === 0) return;
+    exportMessagesAsTxt(safeMessages);
     setBackupNotice('已手动导出聊天记录');
   }
 
   function updateLastAssistantContent(content) {
     setMessages((prev) => {
-      const updated = [...prev];
+      const updated = [...toSafeArray(prev)];
       const lastIndex = updated.length - 1;
       if (lastIndex >= 0 && updated[lastIndex].role === 'assistant') {
         updated[lastIndex] = {
@@ -428,7 +442,7 @@ export default function ChatApp({ onBackHome }) {
       content: input.trim(),
       timestamp: nowTs,
     };
-    const nextMessages = [...messages, userMessage];
+    const nextMessages = [...safeMessages, userMessage];
 
     const systemPromptText = buildStableSystemPrompt();
     const dynamicContext = buildDynamicTurnContext({
@@ -539,7 +553,7 @@ export default function ChatApp({ onBackHome }) {
         await sleep(550);
         const bubbleText = restBubbles[idx];
         setMessages((prev) => [
-          ...prev,
+          ...toSafeArray(prev),
           {
             role: 'assistant',
             content: bubbleText,
@@ -556,7 +570,7 @@ export default function ChatApp({ onBackHome }) {
     setLoading(false);
   }
 
-  const isDisabledAction = loading || messages.length === 0;
+  const isDisabledAction = loading || safeMessages.length === 0;
 
   return (
     <div
@@ -685,7 +699,7 @@ export default function ChatApp({ onBackHome }) {
           background: 'linear-gradient(180deg, #fff7fa 0%, #fce8ef 100%)',
         }}
       >
-        {messages.length === 0 ? (
+        {safeMessages.length === 0 ? (
           <div
             style={{
               height: '100%',
@@ -726,7 +740,7 @@ export default function ChatApp({ onBackHome }) {
             )}
           </div>
         ) : (
-          messages.map((m, i) => {
+          safeMessages.map((m, i) => {
             const isUser = m.role === 'user';
             return (
               <div
@@ -1009,7 +1023,7 @@ export default function ChatApp({ onBackHome }) {
       <RecordManagerModal
         open={managerOpen}
         disabled={loading}
-        messageCount={messages.length}
+        messageCount={safeMessages.length}
         onClose={() => setManagerOpen(false)}
         onConfirmClear={clearMessages}
       />
