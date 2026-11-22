@@ -699,7 +699,7 @@ export default function ChatApp({ onBackHome }) {
               color: '#3b232c',
             }}
           >
-            私聊 · claude
+            私聊 · 顾青
           </h2>
         </div>
 
