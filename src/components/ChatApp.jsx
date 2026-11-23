@@ -219,6 +219,7 @@ async function streamChatOnce({
   model,
   maxTokens,
   onChunk,
+  onChannel,
 }) {
   const resp = await fetch(`${BACKEND_URL}/api/chat`, {
     method: 'POST',
@@ -255,6 +256,9 @@ async function streamChatOnce({
       const parsed = JSON.parse(dataStr);
       if (parsed.error) {
         throw new Error(parsed.error);
+      }
+      if (parsed.channel) {
+        onChannel?.(parsed.channel);
       }
       if (parsed.text) {
         fullText += parsed.text;
@@ -484,7 +488,7 @@ export default function ChatApp({ onBackHome }) {
     setBackupNotice('已手动导出聊天记录');
   }
 
-  function updateLastAssistantContent(content) {
+  function updateLastAssistantContent(content, channelName) {
     setMessages((prev) => {
       const updated = [...toSafeArray(prev)];
       const lastIndex = updated.length - 1;
@@ -492,6 +496,7 @@ export default function ChatApp({ onBackHome }) {
         updated[lastIndex] = {
           ...updated[lastIndex],
           content,
+          ...(channelName ? { channelName } : {}),
         };
       }
       return updated;
@@ -544,11 +549,14 @@ export default function ChatApp({ onBackHome }) {
         role: 'assistant',
         content: '',
         modelLabel: currentModelObj.label,
+        channelName: '',
         timestamp: nowTs,
       },
     ]);
     setInput('');
     setLoading(true);
+
+    let activeChannel = '';
 
     try {
       let currentApiMessages = [...baseApiMessages];
@@ -565,6 +573,10 @@ export default function ChatApp({ onBackHome }) {
           system: systemPromptText,
           model: selectedModel,
           maxTokens: currentLengthObj.maxTokens,
+          onChannel: (ch) => {
+            activeChannel = ch;
+            updateLastAssistantContent(undefined, ch);
+          },
           onChunk: (_chunk, accumulated) => {
             rawReply = accumulated;
             const safePreview = accumulated
@@ -575,7 +587,7 @@ export default function ChatApp({ onBackHome }) {
               rounds > 1 && firstPartText
                 ? `${firstPartText}\n\n${safePreview}`.trim()
                 : safePreview;
-            updateLastAssistantContent(previewText);
+            updateLastAssistantContent(previewText, activeChannel);
           },
         });
 
@@ -600,7 +612,7 @@ export default function ChatApp({ onBackHome }) {
         }
 
         firstPartText = cleanReply;
-        updateLastAssistantContent(firstPartText);
+        updateLastAssistantContent(firstPartText, activeChannel);
 
         currentApiMessages = [
           ...currentApiMessages,
@@ -616,7 +628,7 @@ export default function ChatApp({ onBackHome }) {
       const firstBubble = bubbles[0] ?? '';
       const restBubbles = bubbles.slice(1);
 
-      updateLastAssistantContent(firstBubble);
+      updateLastAssistantContent(firstBubble, activeChannel);
 
       for (let idx = 0; idx < restBubbles.length; idx += 1) {
         await sleep(550);
@@ -627,6 +639,7 @@ export default function ChatApp({ onBackHome }) {
             role: 'assistant',
             content: bubbleText,
             modelLabel: currentModelObj.label,
+            channelName: activeChannel,
             timestamp: Date.now() + idx + 1,
           },
         ]);
@@ -861,6 +874,7 @@ export default function ChatApp({ onBackHome }) {
                     }}
                   >
                     {m.modelLabel}
+                    {m.channelName ? ` · ${m.channelName}` : ''}
                   </span>
                 )}
               </div>
