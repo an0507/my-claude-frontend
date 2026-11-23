@@ -1,12 +1,11 @@
 export const BACKEND_URL = 'https://my-claude-backend.onrender.com';
 
 export const MODEL_OPTIONS = [
-  { id: 'claude-opus-5-5', label: 'Claude Opus 5.5（主力）' },
-  { id: 'claude-fable-5-1', label: 'Claude Fable 5.1（特惠）' },
-  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+  { id: '[Kiro-企业正价]claude-opus-5-5', label: 'Opus 5.5（快）' },
+  { id: '[Kiro-企业正价]claude-opus-4-6', label: 'Opus 4.6（稳）' },
 ];
 
-export const DEFAULT_MODEL = 'claude-opus-5-5';
+export const DEFAULT_MODEL = '[Kiro-企业正价]claude-opus-5-5';
 
 export const RESPONSE_LENGTH_OPTIONS = [
   { id: 'concise', label: '简短', maxTokens: 400 },
