@@ -22,6 +22,7 @@ export const STORAGE_KEYS = {
   ACTIVE_CONVERSATION_ID: 'claude_active_conversation_v1',
   SELECTED_MODEL: 'claude_selected_model_v1',
   RESPONSE_LENGTH: 'claude_response_length_v1',
+  DELETED_MEMORIES: 'claude_deleted_memories_v1',
 };
 
 export const AUTO_BACKUP_CONFIG = {
