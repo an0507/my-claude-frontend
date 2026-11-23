@@ -57,7 +57,11 @@ export function exportBackupSnapshotAsTxt(
   filename = 'claude-backup-snapshot.txt'
 ) {
   const snapshot = readBackupSnapshot(backupKey);
-  if (!snapshot || !Array.isArray(snapshot.messages) || snapshot.messages.length === 0) {
+  if (
+    !snapshot ||
+    !Array.isArray(snapshot.messages) ||
+    snapshot.messages.length === 0
+  ) {
     return false;
   }
   exportMessagesAsTxt(snapshot.messages, filename);
