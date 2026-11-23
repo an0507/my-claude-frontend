@@ -1,11 +1,11 @@
 export const BACKEND_URL = 'https://my-claude-backend.onrender.com';
 
 export const MODEL_OPTIONS = [
-  { id: 'claude-opus-5.5', label: 'Opus 5.5（快）' },
   { id: 'claude-opus-4-6', label: 'Opus 4.6（稳）' },
+  { id: 'claude-opus-5.5', label: 'Opus 5.5（快）' },
 ];
 
-export const DEFAULT_MODEL = 'claude-opus-5.5';
+export const DEFAULT_MODEL = 'claude-opus-4-6';
 
 export const RESPONSE_LENGTH_OPTIONS = [
   { id: 'concise', label: '简短', maxTokens: 400 },
