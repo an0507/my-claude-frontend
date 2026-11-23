@@ -29,11 +29,36 @@ import { attachProactiveCalendarWatcher } from '../utils/proactiveCalendarWatche
 
 const DIARY_STORAGE_KEY =
   STORAGE_KEYS.DIARY_ENTRIES || 'claude_diary_entries_v1';
+const DELETED_MEMORIES_KEY =
+  STORAGE_KEYS.DELETED_MEMORIES || 'claude_deleted_memories_v1';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function toSafeArray(val) {
   return Array.isArray(val) ? val : [];
+}
+
+function normalizeTextForFilter(str = '') {
+  return String(str || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isMessageDeletedInMemory(content = '', deletedMemories = []) {
+  const normMsg = normalizeTextForFilter(content);
+  if (!normMsg || !Array.isArray(deletedMemories) || deletedMemories.length === 0) {
+    return false;
+  }
+  return deletedMemories.some((entry) => {
+    const raw =
+      typeof entry === 'string'
+        ? entry
+        : entry?.content ?? entry?.text ?? '';
+    const normTarget = normalizeTextForFilter(raw);
+    if (!normTarget || normTarget.length < 2) return false;
+    return normMsg === normTarget || normMsg.includes(normTarget);
+  });
 }
 
 function recoverLegacyMessages() {
@@ -182,12 +207,15 @@ ${CALENDAR_SYSTEM_RULE}
 // 动态状态后缀：放在本轮消息末尾，避免打断前面大段缓存前缀
 function buildDynamicTurnContext({
   currentMessages = [],
+  deletedMemories = [],
   selectedModel,
   responseLength,
   hasBackupSnapshot,
   nowDate = new Date(),
 }) {
-  const safeCurrent = toSafeArray(currentMessages);
+  const safeCurrent = toSafeArray(currentMessages).filter(
+    (m) => !isMessageDeletedInMemory(m?.content, deletedMemories)
+  );
   const currentTimeStr = formatCurrentClock(nowDate);
   const diaryList = readStorageJSON(DIARY_STORAGE_KEY, []);
   const allDiaries = Array.isArray(diaryList) ? diaryList : [];
@@ -218,6 +246,7 @@ async function streamChatOnce({
   system,
   model,
   maxTokens,
+  deletedMemories = [],
   onChunk,
   onChannel,
 }) {
@@ -229,6 +258,7 @@ async function streamChatOnce({
       system,
       model,
       maxTokens,
+      deletedMemories,
     }),
   });
 
@@ -276,6 +306,11 @@ export default function ChatApp({ onBackHome }) {
     if (primary.length > 0) return primary;
     return recoverLegacyMessages();
   });
+  const [deletedMemories, setDeletedMemories] = useState(() =>
+    toSafeArray(readStorageJSON(DELETED_MEMORIES_KEY, []))
+  );
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIndices, setSelectedIndices] = useState([]);
   const [selectedModel, setSelectedModel] = useState(() => {
     const saved = readStorageJSON(STORAGE_KEYS.SELECTED_MODEL, null);
     return typeof saved === 'string' && saved ? saved : DEFAULT_MODEL;
@@ -303,6 +338,7 @@ export default function ChatApp({ onBackHome }) {
   const lastAutoBackedCountRef = useRef(0);
   const initializedBackupRef = useRef(false);
   const messagesRef = useRef(safeMessages);
+  const deletedMemoriesRef = useRef(deletedMemories);
   const selectedModelRef = useRef(selectedModel);
   const currentLengthObjRef = useRef(null);
   const backupSnapshotRef = useRef(null);
@@ -316,6 +352,7 @@ export default function ChatApp({ onBackHome }) {
   const backupSnapshot = readBackupSnapshot(STORAGE_KEYS.MESSAGES_BACKUP);
 
   messagesRef.current = safeMessages;
+  deletedMemoriesRef.current = deletedMemories;
   selectedModelRef.current = selectedModel;
   currentLengthObjRef.current = currentLengthObj;
   backupSnapshotRef.current = backupSnapshot;
@@ -328,6 +365,10 @@ export default function ChatApp({ onBackHome }) {
       writeBackupSnapshot(STORAGE_KEYS.MESSAGES_BACKUP, list);
     }
   }, [messages]);
+
+  useEffect(() => {
+    writeStorageJSON(DELETED_MEMORIES_KEY, toSafeArray(deletedMemories));
+  }, [deletedMemories]);
 
   useEffect(() => {
     if (!AUTO_BACKUP_CONFIG.ENABLED) return;
@@ -376,6 +417,13 @@ export default function ChatApp({ onBackHome }) {
         } catch {
           // 忽略解析异常
         }
+      } else if (e.key === DELETED_MEMORIES_KEY) {
+        try {
+          const parsed = e.newValue ? JSON.parse(e.newValue) : [];
+          setDeletedMemories(toSafeArray(parsed));
+        } catch {
+          // 忽略解析异常
+        }
       }
     }
     window.addEventListener('storage', handleStorageChange);
@@ -385,10 +433,14 @@ export default function ChatApp({ onBackHome }) {
   useEffect(() => {
     const cleanup = attachProactiveCalendarWatcher({
       getMessages: () =>
-        toSafeArray(messagesRef.current).map(({ role, content }) => ({
-          role,
-          content,
-        })),
+        toSafeArray(messagesRef.current)
+          .filter(
+            (m) => !isMessageDeletedInMemory(m?.content, deletedMemoriesRef.current)
+          )
+          .map(({ role, content }) => ({
+            role,
+            content,
+          })),
       getBaseSystemPrompt: () => buildStableSystemPrompt(),
       streamChatOnce: async (msgs, sys, onChunk) => {
         return await streamChatOnce({
@@ -396,6 +448,7 @@ export default function ChatApp({ onBackHome }) {
           system: sys,
           model: selectedModelRef.current,
           maxTokens: currentLengthObjRef.current?.maxTokens || 1024,
+          deletedMemories: deletedMemoriesRef.current,
           onChunk,
         });
       },
@@ -429,8 +482,10 @@ export default function ChatApp({ onBackHome }) {
   }, []);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [safeMessages, loading]);
+    if (!selectMode) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [safeMessages, loading, selectMode]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -457,9 +512,76 @@ export default function ChatApp({ onBackHome }) {
     return () => document.removeEventListener('pointerdown', handleOutsideClick);
   }, [lengthMenuOpen]);
 
+  function toggleSelectMode() {
+    if (loading || safeMessages.length === 0) return;
+    setSelectMode((prev) => {
+      const next = !prev;
+      setSelectedIndices([]);
+      return next;
+    });
+  }
+
+  function toggleMessageSelection(idx) {
+    if (!selectMode) return;
+    setSelectedIndices((prev) =>
+      prev.includes(idx) ? prev.filter((item) => item !== idx) : [...prev, idx]
+    );
+  }
+
+  function confirmDeleteSelectedMessages() {
+    if (loading || selectedIndices.length === 0) return;
+    const indexSet = new Set(selectedIndices);
+    const removedItems = safeMessages.filter((_, idx) => indexSet.has(idx));
+    const remainingMessages = safeMessages.filter((_, idx) => !indexSet.has(idx));
+
+    const newMemoryRecords = removedItems
+      .filter((item) => typeof item?.content === 'string' && item.content.trim())
+      .map((item) => ({
+        role: item.role || 'assistant',
+        content: item.content.trim(),
+        deletedAt: Date.now(),
+      }));
+
+    const existingNorms = new Set(
+      toSafeArray(deletedMemories).map((d) =>
+        normalizeTextForFilter(
+          typeof d === 'string' ? d : d?.content ?? d?.text ?? ''
+        )
+      )
+    );
+
+    const mergedDeleted = [...toSafeArray(deletedMemories)];
+    for (const rec of newMemoryRecords) {
+      const norm = normalizeTextForFilter(rec.content);
+      if (norm && !existingNorms.has(norm)) {
+        existingNorms.add(norm);
+        mergedDeleted.push(rec);
+      }
+    }
+
+    setDeletedMemories(mergedDeleted);
+    setMessages(remainingMessages);
+    setSelectedIndices([]);
+    setSelectMode(false);
+
+    if (remainingMessages.length === 0) {
+      try {
+        window.localStorage.removeItem(STORAGE_KEYS.MESSAGES);
+      } catch {
+        // 忽略清理异常
+      }
+    }
+
+    setBackupNotice(
+      `已删除 ${removedItems.length} 条记录，并同步从后台记忆中剔除`
+    );
+  }
+
   function clearMessages() {
     if (loading || safeMessages.length === 0) return;
     setMessages([]);
+    setSelectedIndices([]);
+    setSelectMode(false);
     setBackupNotice('');
     lastAutoBackedCountRef.current = 0;
     try {
@@ -479,6 +601,8 @@ export default function ChatApp({ onBackHome }) {
       return;
     }
     setMessages(backupSnapshot.messages);
+    setSelectedIndices([]);
+    setSelectMode(false);
     setBackupNotice(`已恢复上次备份（${backupSnapshot.messages.length} 条）`);
   }
 
@@ -507,6 +631,8 @@ export default function ChatApp({ onBackHome }) {
     if (!input.trim() || loading) return;
     setMenuOpen(false);
     setLengthMenuOpen(false);
+    setSelectMode(false);
+    setSelectedIndices([]);
     setBackupNotice('');
 
     const nowTs = Date.now();
@@ -521,27 +647,36 @@ export default function ChatApp({ onBackHome }) {
     const systemPromptText = buildStableSystemPrompt();
     const dynamicContext = buildDynamicTurnContext({
       currentMessages: nextMessages,
+      deletedMemories,
       selectedModel,
       responseLength: currentLengthObj.label,
       hasBackupSnapshot: Boolean(backupSnapshot),
       nowDate,
     });
 
-    const baseApiMessages = nextMessages.map(({ role, content, timestamp }, idx) => {
-      const timeLabel = formatMessageTime(timestamp, nowDate);
-      const prefix = role === 'user' ? `[${timeLabel}] ` : '';
-      const baseText = `${prefix}${content || ''}`;
-      if (role === 'user' && idx === nextMessages.length - 1) {
+    const filteredApiMessages = nextMessages.filter(
+      (m, idx) =>
+        idx === nextMessages.length - 1 ||
+        !isMessageDeletedInMemory(m?.content, deletedMemories)
+    );
+
+    const baseApiMessages = filteredApiMessages.map(
+      ({ role, content, timestamp }, idx) => {
+        const timeLabel = formatMessageTime(timestamp, nowDate);
+        const prefix = role === 'user' ? `[${timeLabel}] ` : '';
+        const baseText = `${prefix}${content || ''}`;
+        if (role === 'user' && idx === filteredApiMessages.length - 1) {
+          return {
+            role,
+            content: `${baseText}\n\n${dynamicContext}`,
+          };
+        }
         return {
           role,
-          content: `${baseText}\n\n${dynamicContext}`,
+          content: baseText,
         };
       }
-      return {
-        role,
-        content: baseText,
-      };
-    });
+    );
 
     setMessages([
       ...nextMessages,
@@ -573,6 +708,7 @@ export default function ChatApp({ onBackHome }) {
           system: systemPromptText,
           model: selectedModel,
           maxTokens: currentLengthObj.maxTokens,
+          deletedMemories,
           onChannel: (ch) => {
             activeChannel = ch;
             updateLastAssistantContent(undefined, ch);
@@ -718,6 +854,33 @@ export default function ChatApp({ onBackHome }) {
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <button
+            type="button"
+            onClick={toggleSelectMode}
+            disabled={isDisabledAction}
+            style={{
+              padding: '6px 10px',
+              fontSize: 12,
+              borderRadius: 999,
+              border: '1px solid #f0cedb',
+              background: selectMode
+                ? '#ffe4ee'
+                : isDisabledAction
+                ? '#fdf2f6'
+                : '#ffffff',
+              color: selectMode
+                ? '#be185d'
+                : isDisabledAction
+                ? '#c4a4b0'
+                : '#6e4d59',
+              fontWeight: selectMode ? 600 : 400,
+              cursor: isDisabledAction ? 'not-allowed' : 'pointer',
+              transition: 'all 0.15s ease',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {selectMode ? '取消删选' : '删记录'}
+          </button>
+          <button
             onClick={handleExportMessages}
             disabled={isDisabledAction}
             style={{
@@ -754,6 +917,49 @@ export default function ChatApp({ onBackHome }) {
           </button>
         </div>
       </div>
+
+      {/* 删选模式操作条 */}
+      {selectMode && (
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            padding: '8px 14px',
+            fontSize: 12,
+            color: '#9d174d',
+            background: '#ffeef4',
+            borderBottom: '1px solid #f8d2e0',
+            gap: 8,
+          }}
+        >
+          <span>
+            点击消息选中要删除的内容（已选 {selectedIndices.length} 条，删后同步剔除记忆）
+          </span>
+          <button
+            type="button"
+            onClick={confirmDeleteSelectedMessages}
+            disabled={selectedIndices.length === 0 || loading}
+            style={{
+              padding: '5px 12px',
+              fontSize: 12,
+              fontWeight: 600,
+              borderRadius: 999,
+              border: 'none',
+              background:
+                selectedIndices.length === 0 || loading ? '#f3c3d4' : '#db2777',
+              color: '#ffffff',
+              cursor:
+                selectedIndices.length === 0 || loading
+                  ? 'not-allowed'
+                  : 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            确认删除 ({selectedIndices.length})
+          </button>
+        </div>
+      )}
 
       {/* 自动备份状态提示 */}
       {backupNotice && (
@@ -824,14 +1030,29 @@ export default function ChatApp({ onBackHome }) {
         ) : (
           safeMessages.map((m, i) => {
             const isUser = m.role === 'user';
+            const isSelected = selectedIndices.includes(i);
             return (
               <div
                 key={i}
+                onClick={() => toggleMessageSelection(i)}
                 style={{
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: isUser ? 'flex-end' : 'flex-start',
                   marginBottom: 14,
+                  cursor: selectMode ? 'pointer' : 'default',
+                  padding: selectMode ? '4px 6px' : 0,
+                  borderRadius: selectMode ? 14 : 0,
+                  background:
+                    selectMode && isSelected
+                      ? 'rgba(219, 39, 119, 0.08)'
+                      : 'transparent',
+                  outline:
+                    selectMode && isSelected
+                      ? '1.5px solid #db2777'
+                      : selectMode
+                      ? '1px dashed #e5b3c6'
+                      : 'none',
                 }}
               >
                 <div
@@ -855,6 +1076,19 @@ export default function ChatApp({ onBackHome }) {
                       : '1px solid #f7e4eb',
                   }}
                 >
+                  {selectMode && (
+                    <span
+                      style={{
+                        display: 'inline-block',
+                        marginRight: 8,
+                        fontSize: 12,
+                        fontWeight: 700,
+                        color: isSelected ? '#be185d' : '#9a7b86',
+                      }}
+                    >
+                      {isSelected ? '☑' : '☐'}
+                    </span>
+                  )}
                   {m.content ||
                     (m.role === 'assistant' && loading ? (
                       <span style={{ color: '#9a7b86', fontSize: 14 }}>
