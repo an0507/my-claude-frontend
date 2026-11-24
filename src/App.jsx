@@ -3,6 +3,7 @@ import ChatApp from './components/ChatApp';
 import DiaryApp from './components/DiaryApp';
 import PhoneHome from './components/PhoneHome';
 import CalendarApp from './components/CalendarApp';
+import LoveQuotesApp from './components/LoveQuotesApp';
 
 class ViewErrorBoundary extends React.Component {
   constructor(props) {
@@ -106,6 +107,8 @@ export default function App() {
             <DiaryApp onBackHome={() => setActiveApp('home')} />
           ) : activeApp === 'calendar' ? (
             <CalendarApp onBackHome={() => setActiveApp('home')} />
+          ) : activeApp === 'quotes' ? (
+            <LoveQuotesApp onBackHome={() => setActiveApp('home')} />
           ) : (
             <ChatApp onBackHome={() => setActiveApp('home')} />
           )}
