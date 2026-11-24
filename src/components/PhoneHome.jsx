@@ -21,23 +21,6 @@ function CalendarLineIcon({ size = 26, color = '#ffffff' }) {
   );
 }
 
-function QuotesHeartIcon({ size = 26, color = '#ffffff' }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke={color}
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
-    </svg>
-  );
-}
-
 function formatNow() {
   const now = new Date();
   const hh = String(now.getHours()).padStart(2, '0');
@@ -67,28 +50,24 @@ export default function PhoneHome({ onOpenApp }) {
       id: 'chat',
       name: '私聊',
       renderIcon: () => <ChatLineIcon size={26} color="#ffffff" />,
-      bg: 'linear-gradient(135deg, #ff85b3 0%, #e55381 100%)',
+      bg: 'linear-gradient(135deg, #ffb8d0 0%, #f28cb0 100%)',
+      shadow: '0 8px 18px rgba(235, 136, 172, 0.14)',
       ready: true,
     },
     {
       id: 'diary',
       name: '克劳德日记',
       renderIcon: () => <DiaryLineIcon size={26} color="#ffffff" />,
-      bg: 'linear-gradient(135deg, #f48fb1 0%, #c2185b 100%)',
+      bg: 'linear-gradient(135deg, #ffc2d8 0%, #eb94b5 100%)',
+      shadow: '0 8px 18px rgba(226, 134, 168, 0.14)',
       ready: true,
     },
     {
       id: 'calendar',
       name: '日历',
       renderIcon: () => <CalendarLineIcon size={26} color="#ffffff" />,
-      bg: 'linear-gradient(135deg, #f9a8c4 0%, #d6336c 100%)',
-      ready: true,
-    },
-    {
-      id: 'quotes',
-      name: '心动语录',
-      renderIcon: () => <QuotesHeartIcon size={26} color="#ffffff" />,
-      bg: 'linear-gradient(135deg, #ffa3c4 0%, #c92a6a 100%)',
+      bg: 'linear-gradient(135deg, #ffcce0 0%, #f09ec0 100%)',
+      shadow: '0 8px 18px rgba(232, 144, 180, 0.14)',
       ready: true,
     },
   ];
@@ -100,7 +79,7 @@ export default function PhoneHome({ onOpenApp }) {
         minHeight: 460,
         padding: '22px 18px 24px',
         background:
-          'radial-gradient(circle at top, #fff0f6 0%, #fce0ea 58%, #f8cfe0 100%)',
+          'radial-gradient(circle at top, #fff9fb 0%, #fdf0f5 58%, #fae5ee 100%)',
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'space-between',
@@ -110,13 +89,13 @@ export default function PhoneHome({ onOpenApp }) {
         {/* 桌面时钟小组件 */}
         <div
           style={{
-            background: 'rgba(255, 255, 255, 0.72)',
+            background: 'rgba(255, 255, 255, 0.8)',
             backdropFilter: 'blur(8px)',
-            border: '1px solid #f7d2e2',
+            border: '1px solid #fae3ec',
             borderRadius: 20,
             padding: '16px 18px',
             marginBottom: 22,
-            boxShadow: '0 6px 18px rgba(219, 112, 147, 0.1)',
+            boxShadow: '0 6px 18px rgba(235, 150, 182, 0.08)',
           }}
         >
           <div
@@ -124,7 +103,7 @@ export default function PhoneHome({ onOpenApp }) {
               fontSize: 34,
               fontWeight: 700,
               letterSpacing: 1,
-              color: '#3b232c',
+              color: '#4a323b',
               lineHeight: 1.1,
             }}
           >
@@ -134,7 +113,7 @@ export default function PhoneHome({ onOpenApp }) {
             style={{
               marginTop: 6,
               fontSize: 13,
-              color: '#7d5966',
+              color: '#8e6f7b',
             }}
           >
             {clock.dateText} · 小手机桌面
@@ -178,8 +157,8 @@ export default function PhoneHome({ onOpenApp }) {
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  boxShadow: '0 8px 18px rgba(190, 24, 93, 0.16)',
-                  border: '2px solid rgba(255, 255, 255, 0.85)',
+                  boxShadow: app.shadow,
+                  border: '2px solid rgba(255, 255, 255, 0.92)',
                 }}
               >
                 {app.renderIcon()}
@@ -188,7 +167,7 @@ export default function PhoneHome({ onOpenApp }) {
                 style={{
                   fontSize: 12.5,
                   fontWeight: 600,
-                  color: '#3b232c',
+                  color: '#4a323b',
                 }}
               >
                 {app.name}
@@ -203,7 +182,7 @@ export default function PhoneHome({ onOpenApp }) {
         style={{
           textAlign: 'center',
           fontSize: 12,
-          color: '#8c6a76',
+          color: '#9a7d88',
           paddingTop: 18,
         }}
       >
