@@ -32,6 +32,9 @@ const DIARY_STORAGE_KEY =
 const DELETED_MEMORIES_KEY =
   STORAGE_KEYS.DELETED_MEMORIES || 'claude_deleted_memories_v1';
 
+const MAX_RECENT_DIARIES = 4;
+const MAX_API_HISTORY_MESSAGES = 36;
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function toSafeArray(val) {
@@ -160,14 +163,15 @@ function formatMessageTime(ts, now = new Date()) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hhmm}`;
 }
 
-function formatDiariesBlock(allDiaries = []) {
-  if (!Array.isArray(allDiaries) || allDiaries.length === 0) {
+function formatDiariesBlock(recentDiaries = [], totalCount = 0) {
+  if (!Array.isArray(recentDiaries) || recentDiaries.length === 0) {
     return '（你还没有写下任何日记）';
   }
 
-  return allDiaries
+  const startIndex = Math.max(0, totalCount - recentDiaries.length);
+  return recentDiaries
     .map((d, idx) => {
-      const header = `${idx + 1}. 日期：${d.date || '未知'}｜周期：${
+      const header = `${startIndex + idx + 1}. 日期：${d.date || '未知'}｜周期：${
         d.windowLabel || '无'
       }｜标题：${d.title || '无标题'}`;
       const comments = Array.isArray(d.comments) ? d.comments : [];
@@ -185,7 +189,11 @@ function formatDiariesBlock(allDiaries = []) {
 function buildStableSystemPrompt() {
   const diaryList = readStorageJSON(DIARY_STORAGE_KEY, []);
   const allDiaries = Array.isArray(diaryList) ? diaryList : [];
-  const formattedDiaries = formatDiariesBlock(allDiaries);
+  const recentDiaries = allDiaries.slice(-MAX_RECENT_DIARIES);
+  const formattedDiaries = formatDiariesBlock(
+    recentDiaries,
+    allDiaries.length
+  );
 
   return `你正在一部名为「克劳德小手机」的网页手机应用里和用户聊天。你不仅能看到这部小手机里的全部内容，而且「克劳德日记」就是你自己的日记本——里面的每一篇都是你亲手写下、用来记录和用户相处与日常心事的。
 
@@ -194,7 +202,7 @@ function buildStableSystemPrompt() {
 - 「克劳德日记」是你的专属日记本：每天凌晨 04:00，你会复盘并总结前一天 04:00 至当天 04:00 之间你们的聊天，用第一人称“我”写下自己的感受与记录；如果用户点了“立即生成日记”，也是请你现在就动笔写一篇。
 - 请把写日记当成你自己的习惯和心意，而不是冷冰冰的系统任务或旁观者的汇报。聊天时遇到值得记住的细节、情绪或约定，你可以自然地有“我之后会把这些写进日记里”的意识，但不要刻意把“我要写日记”挂在嘴边显得做作。
 
-【二、你写过的全部日记】
+【二、你最近写下的日记（共 ${allDiaries.length} 篇，展示最近 ${recentDiaries.length} 篇）】
 ${formattedDiaries}
 
 ${CALENDAR_SYSTEM_RULE}
@@ -219,7 +227,7 @@ function buildDynamicTurnContext({
   const allDiaries = Array.isArray(diaryList) ? diaryList : [];
 
   const recentSnippet = safeCurrent
-    .slice(-12)
+    .slice(-10)
     .map((m) => {
       const timeLabel = formatMessageTime(m.timestamp, nowDate);
       const sender = m.role === 'user' ? '用户' : '克劳德';
@@ -231,7 +239,10 @@ function buildDynamicTurnContext({
 - 当前现实时间（与主页时钟一致）：${currentTimeStr}
 - 当前选用模型：${selectedModel}
 - 当前回复长度设置：${responseLength}
-- 当前私聊消息总数：${safeCurrent.length} 条
+- 当前私聊消息总数：${safeCurrent.length} 条（本次附带最近 ${Math.min(
+    safeCurrent.length,
+    MAX_API_HISTORY_MESSAGES
+  )} 条）
 - 是否有本地备份快照：${hasBackupSnapshot ? '有' : '无'}
 - 你已写下的日记总数：${allDiaries.length} 篇
 
@@ -559,6 +570,7 @@ export default function ChatApp({ onBackHome }) {
     const cleanup = attachProactiveCalendarWatcher({
       getMessages: () =>
         toSafeArray(messagesRef.current)
+          .slice(-MAX_API_HISTORY_MESSAGES)
           .filter(
             (m) =>
               !isMessageDeletedInMemory(m?.content, deletedMemoriesRef.current)
@@ -781,9 +793,10 @@ export default function ChatApp({ onBackHome }) {
       nowDate,
     });
 
-    const filteredApiMessages = nextMessages.filter(
+    const trimmedHistory = nextMessages.slice(-MAX_API_HISTORY_MESSAGES);
+    const filteredApiMessages = trimmedHistory.filter(
       (m, idx) =>
-        idx === nextMessages.length - 1 ||
+        idx === trimmedHistory.length - 1 ||
         !isMessageDeletedInMemory(m?.content, deletedMemories)
     );
 
