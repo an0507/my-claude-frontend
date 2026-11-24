@@ -1,144 +1,61 @@
-import React, { useState } from 'react';
+import { useEffect, useState } from 'react';
+import CalendarApp from './components/CalendarApp';
 import ChatApp from './components/ChatApp';
 import DiaryApp from './components/DiaryApp';
-import PhoneHome from './components/PhoneHome';
-import CalendarApp from './components/CalendarApp';
 import LoveQuotesApp from './components/LoveQuotesApp';
-
-class ViewErrorBoundary extends React.Component {
-  constructor(props) {
-    super(props);
-    this.state = { error: null };
-  }
-
-  static getDerivedStateFromError(error) {
-    return { error };
-  }
-
-  componentDidCatch(error, info) {
-    console.error('[ViewErrorBoundary]', error, info);
-  }
-
-  render() {
-    if (this.state.error) {
-      return (
-        <div
-          style={{
-            padding: 20,
-            margin: 16,
-            borderRadius: 16,
-            background: '#fff0f5',
-            border: '1px solid #f3c2d2',
-            color: '#6b1d3a',
-            fontSize: 13,
-            lineHeight: 1.6,
-          }}
-        >
-          <div style={{ fontWeight: 700, marginBottom: 6 }}>
-            页面渲染出错了（已拦截白屏）
-          </div>
-          <div style={{ wordBreak: 'break-word', marginBottom: 12 }}>
-            {this.state.error?.message || String(this.state.error)}
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              this.setState({ error: null });
-              this.props.onReset?.();
-            }}
-            style={{
-              padding: '6px 14px',
-              borderRadius: 999,
-              border: '1px solid #e57399',
-              background: '#ffffff',
-              color: '#be185d',
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
-          >
-            返回桌面重试
-          </button>
-        </div>
-      );
-    }
-
-    return this.props.children;
-  }
-}
+import PhoneHome from './components/PhoneHome';
 
 export default function App() {
   const [activeApp, setActiveApp] = useState('home');
+
+  useEffect(() => {
+    console.log('[quotes-debug] App activeApp 变为:', activeApp);
+  }, [activeApp]);
+
+  const handleSelectApp = (nextApp) => {
+    console.log('[quotes-debug] handleSelectApp 收到:', nextApp);
+    setActiveApp(nextApp);
+  };
+
+  const handleBackHome = () => {
+    console.log('[quotes-debug] 返回桌面');
+    setActiveApp('home');
+  };
+
+  let content = null;
+  if (activeApp === 'home') {
+    content = <PhoneHome activeApp={activeApp} onSelectApp={handleSelectApp} />;
+  } else if (activeApp === 'diary') {
+    content = <DiaryApp onBackHome={handleBackHome} />;
+  } else if (activeApp === 'calendar') {
+    content = <CalendarApp onBackHome={handleBackHome} />;
+  } else if (activeApp === 'quotes') {
+    content = <LoveQuotesApp onBackHome={handleBackHome} />;
+  } else {
+    content = <ChatApp onBackHome={handleBackHome} />;
+  }
 
   return (
     <div
       style={{
         minHeight: '100dvh',
-        background: 'linear-gradient(180deg, #fff5f8 0%, #fde4ec 100%)',
-        fontFamily:
-          '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif',
-        color: '#2d1e24',
         display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        padding: '20px 12px 28px',
-        boxSizing: 'border-box',
+        flexDirection: 'column',
+        background: '#fff7fa',
       }}
     >
       <div
         style={{
-          width: '100%',
-          maxWidth: 440,
-          background: '#fff9fb',
-          borderRadius: 28,
-          boxShadow: '0 14px 36px rgba(219, 112, 147, 0.2)',
-          border: '2px solid #f5c6d6',
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
+          fontSize: 11,
+          padding: '3px 10px',
+          background: '#ffe4ee',
+          color: '#9d174d',
+          borderBottom: '1px solid #f5c6d6',
         }}
       >
-        <ViewErrorBoundary
-          key={activeApp}
-          onReset={() => setActiveApp('home')}
-        >
-          {activeApp === 'home' ? (
-            <PhoneHome onOpenApp={(appId) => setActiveApp(appId)} />
-          ) : activeApp === 'diary' ? (
-            <DiaryApp onBackHome={() => setActiveApp('home')} />
-          ) : activeApp === 'calendar' ? (
-            <CalendarApp onBackHome={() => setActiveApp('home')} />
-          ) : activeApp === 'quotes' ? (
-            <LoveQuotesApp onBackHome={() => setActiveApp('home')} />
-          ) : (
-            <ChatApp onBackHome={() => setActiveApp('home')} />
-          )}
-        </ViewErrorBoundary>
-
-        {/* 底部 Home 导航条 */}
-        <div
-          style={{
-            padding: '10px 16px 12px',
-            background: '#fff9fb',
-            borderTop: '1px solid #fce4ec',
-            display: 'flex',
-            justifyContent: 'center',
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => setActiveApp('home')}
-            title="回到手机主页"
-            style={{
-              width: 112,
-              height: 5,
-              borderRadius: 999,
-              border: 'none',
-              background: activeApp === 'home' ? '#f0cedb' : '#e57399',
-              cursor: 'pointer',
-            }}
-          />
-        </div>
+        调试状态 activeApp = {String(activeApp)}
       </div>
+      {content}
     </div>
   );
 }
