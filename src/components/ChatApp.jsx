@@ -67,13 +67,11 @@ function isMessageDeletedInMemory(content = '', deletedMemories = []) {
 
 function recoverLegacyMessages() {
   try {
-    // 1. 优先读取标准备份快照
     const snap = readBackupSnapshot(STORAGE_KEYS.MESSAGES_BACKUP);
     if (snap && Array.isArray(snap.messages) && snap.messages.length > 0) {
       return snap.messages;
     }
 
-    // 2. 兼容此前 STORAGE_KEYS.MESSAGES 缺失时写入的 "undefined" 键
     const rawUndefined = window.localStorage.getItem('undefined');
     if (rawUndefined) {
       const parsed = JSON.parse(rawUndefined);
@@ -89,7 +87,6 @@ function recoverLegacyMessages() {
       }
     }
 
-    // 3. 兼容旧版多会话存储 claude_conversations_v1
     const convs = readStorageJSON(STORAGE_KEYS.CONVERSATIONS, []);
     if (Array.isArray(convs) && convs.length > 0) {
       const activeId = readStorageJSON(
@@ -106,7 +103,6 @@ function recoverLegacyMessages() {
       }
     }
 
-    // 4. 兼容旧版自动备份列表 claude_auto_backups_v1
     const autoBackups = readStorageJSON(AUTO_BACKUP_CONFIG.STORAGE_KEY, []);
     if (Array.isArray(autoBackups) && autoBackups.length > 0) {
       const latest = autoBackups[autoBackups.length - 1];
@@ -186,7 +182,6 @@ function formatDiariesBlock(allDiaries = []) {
     .join('\n\n');
 }
 
-// 稳定前缀：尽量不包含每轮都会变的秒级时间或消息计数，便于命中 Prompt Cache
 function buildStableSystemPrompt() {
   const diaryList = readStorageJSON(DIARY_STORAGE_KEY, []);
   const allDiaries = Array.isArray(diaryList) ? diaryList : [];
@@ -208,7 +203,6 @@ ${CALENDAR_SYSTEM_RULE}
 - 如果你想像真人聊天那样连发多条短消息，可以用 [[分句]] 把不同气泡隔开（一般 2～4 条即可，保持自然克制，不要过度刷屏）；如果只想回一条，直接正常说话即可，不要加 [[分句]]。`;
 }
 
-// 动态状态后缀：放在本轮消息末尾，避免打断前面大段缓存前缀
 function buildDynamicTurnContext({
   currentMessages = [],
   deletedMemories = [],
@@ -334,6 +328,17 @@ export default function ChatApp({ onBackHome }) {
   const [loading, setLoading] = useState(false);
   const [backupNotice, setBackupNotice] = useState('');
 
+  // 心动语录面板（你手动记、看、改、删）
+  const [quotesModalOpen, setQuotesModalOpen] = useState(false);
+  const [quotesContent, setQuotesContent] = useState('');
+  const [quotesLoading, setQuotesLoading] = useState(false);
+  const [quotesMsg, setQuotesMsg] = useState('');
+  const [quoteSection, setQuoteSection] = useState('安安');
+  const [quoteDate, setQuoteDate] = useState('');
+  const [quoteText, setQuoteText] = useState('');
+  const [editTargetQuote, setEditTargetQuote] = useState('');
+  const [editNewQuote, setEditNewQuote] = useState('');
+
   const safeMessages = toSafeArray(messages);
 
   const bottomRef = useRef(null);
@@ -361,6 +366,122 @@ export default function ChatApp({ onBackHome }) {
   currentLengthObjRef.current = currentLengthObj;
   backupSnapshotRef.current = backupSnapshot;
   loadingRef.current = loading;
+
+  async function fetchLoveQuotes() {
+    setQuotesLoading(true);
+    setQuotesMsg('');
+    try {
+      const resp = await fetch(`${BACKEND_URL}/api/love-quotes`);
+      const data = await resp.json();
+      if (!resp.ok || data.error) {
+        throw new Error(data.error || '读取心动语录失败');
+      }
+      setQuotesContent(data.content || '');
+    } catch (err) {
+      setQuotesMsg(err.message || '读取失败，请检查后端连接');
+    } finally {
+      setQuotesLoading(false);
+    }
+  }
+
+  async function handleAppendQuote() {
+    const clean = quoteText.trim();
+    if (!clean || quotesLoading) return;
+    setQuotesLoading(true);
+    setQuotesMsg('');
+    try {
+      const resp = await fetch(`${BACKEND_URL}/api/love-quotes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'append',
+          section: quoteSection,
+          date: quoteDate.trim() || undefined,
+          quote: clean,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok || data.error) {
+        throw new Error(data.error || '写入失败');
+      }
+      setQuotesContent(data.content || '');
+      setQuoteText('');
+      setQuotesMsg(`已记入【${quoteSection}心动语录】`);
+    } catch (err) {
+      setQuotesMsg(err.message || '写入失败');
+    } finally {
+      setQuotesLoading(false);
+    }
+  }
+
+  async function handleEditQuote() {
+    const target = editTargetQuote.trim();
+    const next = editNewQuote.trim();
+    if (!target || !next || quotesLoading) return;
+    setQuotesLoading(true);
+    setQuotesMsg('');
+    try {
+      const resp = await fetch(`${BACKEND_URL}/api/love-quotes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'edit',
+          section: quoteSection,
+          date: quoteDate.trim() || undefined,
+          targetQuote: target,
+          newQuote: next,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok || data.error) {
+        throw new Error(data.error || '修改失败');
+      }
+      setQuotesContent(data.content || '');
+      setEditTargetQuote('');
+      setEditNewQuote('');
+      setQuotesMsg('已修改语录');
+    } catch (err) {
+      setQuotesMsg(err.message || '修改失败');
+    } finally {
+      setQuotesLoading(false);
+    }
+  }
+
+  async function handleDeleteQuote() {
+    const target = editTargetQuote.trim();
+    if (!target || quotesLoading) return;
+    setQuotesLoading(true);
+    setQuotesMsg('');
+    try {
+      const resp = await fetch(`${BACKEND_URL}/api/love-quotes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'delete',
+          section: quoteSection,
+          date: quoteDate.trim() || undefined,
+          targetQuote: target,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok || data.error) {
+        throw new Error(data.error || '删除失败');
+      }
+      setQuotesContent(data.content || '');
+      setEditTargetQuote('');
+      setQuotesMsg('已删除该条语录');
+    } catch (err) {
+      setQuotesMsg(err.message || '删除失败');
+    } finally {
+      setQuotesLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (quotesModalOpen) {
+      fetchLoveQuotes();
+    }
+  }, [quotesModalOpen]);
 
   useEffect(() => {
     const list = toSafeArray(messages);
@@ -869,6 +990,24 @@ export default function ChatApp({ onBackHome }) {
         >
           <button
             type="button"
+            onClick={() => setQuotesModalOpen(true)}
+            disabled={loading}
+            style={{
+              padding: '6px 10px',
+              fontSize: 12,
+              fontWeight: 600,
+              borderRadius: 999,
+              border: '1px solid #f3b8ce',
+              background: '#ffeef4',
+              color: '#be185d',
+              cursor: loading ? 'not-allowed' : 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            记语录
+          </button>
+          <button
+            type="button"
             onClick={toggleSelectMode}
             disabled={isDisabledAction}
             style={{
@@ -1350,6 +1489,289 @@ export default function ChatApp({ onBackHome }) {
           </div>
         </div>
       </div>
+
+      {/* 你自己记/看/改/删心动语录的弹窗 */}
+      {quotesModalOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(59, 35, 44, 0.35)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 14,
+            zIndex: 60,
+          }}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: 460,
+              maxHeight: '86dvh',
+              overflowY: 'auto',
+              background: '#fff9fb',
+              border: '1px solid #f0cedb',
+              borderRadius: 18,
+              padding: 16,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 12,
+              boxShadow: '0 16px 40px rgba(190, 24, 93, 0.2)',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <h3 style={{ margin: 0, fontSize: 15, color: '#3b232c' }}>
+                心动语录（自己记 / 改 / 删）
+              </h3>
+              <button
+                type="button"
+                onClick={() => setQuotesModalOpen(false)}
+                style={{
+                  padding: '4px 10px',
+                  fontSize: 12,
+                  borderRadius: 999,
+                  border: '1px solid #f0cedb',
+                  background: '#ffffff',
+                  color: '#6e4d59',
+                  cursor: 'pointer',
+                }}
+              >
+                关闭
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <button
+                type="button"
+                onClick={() => setQuoteSection('安安')}
+                style={{
+                  padding: '5px 12px',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  borderRadius: 999,
+                  border: '1px solid #f0cedb',
+                  background: quoteSection === '安安' ? '#ffe4ee' : '#ffffff',
+                  color: quoteSection === '安安' ? '#be185d' : '#6e4d59',
+                  cursor: 'pointer',
+                }}
+              >
+                安安语录
+              </button>
+              <button
+                type="button"
+                onClick={() => setQuoteSection('顾青')}
+                style={{
+                  padding: '5px 12px',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  borderRadius: 999,
+                  border: '1px solid #f0cedb',
+                  background: quoteSection === '顾青' ? '#ffe4ee' : '#ffffff',
+                  color: quoteSection === '顾青' ? '#be185d' : '#6e4d59',
+                  cursor: 'pointer',
+                }}
+              >
+                顾青语录
+              </button>
+              <input
+                value={quoteDate}
+                onChange={(e) => setQuoteDate(e.target.value)}
+                placeholder="日期如 11.24（可空）"
+                style={{
+                  flex: 1,
+                  padding: '6px 10px',
+                  fontSize: 12,
+                  borderRadius: 10,
+                  border: '1px solid #f2cedb',
+                  background: '#ffffff',
+                  color: '#2d1e24',
+                }}
+              />
+            </div>
+
+            {/* 新增一条 */}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                value={quoteText}
+                onChange={(e) => setQuoteText(e.target.value)}
+                placeholder={`写一句记进【${quoteSection}心动语录】…`}
+                style={{
+                  flex: 1,
+                  padding: '8px 12px',
+                  fontSize: 13,
+                  borderRadius: 10,
+                  border: '1px solid #f2cedb',
+                  background: '#ffffff',
+                  color: '#2d1e24',
+                }}
+              />
+              <button
+                type="button"
+                disabled={quotesLoading || !quoteText.trim()}
+                onClick={handleAppendQuote}
+                style={{
+                  padding: '0 14px',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  borderRadius: 10,
+                  border: 'none',
+                  background:
+                    quotesLoading || !quoteText.trim() ? '#f5c6d6' : '#e57399',
+                  color: '#ffffff',
+                  cursor:
+                    quotesLoading || !quoteText.trim()
+                      ? 'not-allowed'
+                      : 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                记进去
+              </button>
+            </div>
+
+            {/* 修改或删除已有单条 */}
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 6,
+                padding: 10,
+                borderRadius: 12,
+                background: '#fff0f5',
+                border: '1px solid #f7dce6',
+              }}
+            >
+              <input
+                value={editTargetQuote}
+                onChange={(e) => setEditTargetQuote(e.target.value)}
+                placeholder="要改或要删的那句话（填原句或关键词）"
+                style={{
+                  padding: '7px 10px',
+                  fontSize: 12,
+                  borderRadius: 8,
+                  border: '1px solid #f2cedb',
+                  background: '#ffffff',
+                  color: '#2d1e24',
+                }}
+              />
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input
+                  value={editNewQuote}
+                  onChange={(e) => setEditNewQuote(e.target.value)}
+                  placeholder="改成的新句子（只删除可不填）"
+                  style={{
+                    flex: 1,
+                    padding: '7px 10px',
+                    fontSize: 12,
+                    borderRadius: 8,
+                    border: '1px solid #f2cedb',
+                    background: '#ffffff',
+                    color: '#2d1e24',
+                  }}
+                />
+                <button
+                  type="button"
+                  disabled={
+                    quotesLoading ||
+                    !editTargetQuote.trim() ||
+                    !editNewQuote.trim()
+                  }
+                  onClick={handleEditQuote}
+                  style={{
+                    padding: '0 10px',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    borderRadius: 8,
+                    border: '1px solid #f0cedb',
+                    background: '#ffffff',
+                    color: '#be185d',
+                    cursor: 'pointer',
+                  }}
+                >
+                  修改
+                </button>
+                <button
+                  type="button"
+                  disabled={quotesLoading || !editTargetQuote.trim()}
+                  onClick={handleDeleteQuote}
+                  style={{
+                    padding: '0 10px',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    borderRadius: 8,
+                    border: '1px solid #f5b8ce',
+                    background: '#ffe4ee',
+                    color: '#9d174d',
+                    cursor: 'pointer',
+                  }}
+                >
+                  删除
+                </button>
+              </div>
+            </div>
+
+            {quotesMsg && (
+              <div style={{ fontSize: 12, color: '#be185d' }}>{quotesMsg}</div>
+            )}
+
+            {/* 当前文件内容预览 */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  fontSize: 12,
+                  color: '#8c6a76',
+                }}
+              >
+                <span>当前语录本内容</span>
+                <button
+                  type="button"
+                  onClick={fetchLoveQuotes}
+                  disabled={quotesLoading}
+                  style={{
+                    padding: '2px 8px',
+                    fontSize: 11,
+                    borderRadius: 999,
+                    border: '1px solid #f0cedb',
+                    background: '#ffffff',
+                    color: '#6e4d59',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {quotesLoading ? '刷新中…' : '刷新'}
+                </button>
+              </div>
+              <pre
+                style={{
+                  margin: 0,
+                  padding: 10,
+                  maxHeight: 210,
+                  overflowY: 'auto',
+                  borderRadius: 12,
+                  background: '#ffffff',
+                  border: '1px solid #f5dbe4',
+                  fontSize: 12,
+                  lineHeight: 1.55,
+                  color: '#3b232c',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                }}
+              >
+                {quotesContent || '（暂无内容）'}
+              </pre>
+            </div>
+          </div>
+        </div>
+      )}
 
       <RecordManagerModal
         open={managerOpen}
