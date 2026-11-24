@@ -1,21 +1,35 @@
+import * as LineIcons from './LineIcons';
+
+const ChatLineIcon =
+  LineIcons.ChatLineIcon ||
+  (() => <span style={{ fontSize: 20, lineHeight: 1 }}>💬</span>);
+
+const DiaryLineIcon =
+  LineIcons.DiaryLineIcon ||
+  (() => <span style={{ fontSize: 20, lineHeight: 1 }}>📓</span>);
+
+const CalendarLineIcon =
+  LineIcons.CalendarLineIcon ||
+  (() => <span style={{ fontSize: 20, lineHeight: 1 }}>📅</span>);
+
 const DESKTOP_APPS = [
   {
     id: 'chat',
     label: '私聊',
     badge: '顾青',
-    glyph: '💬',
+    Icon: ChatLineIcon,
   },
   {
     id: 'diary',
     label: '克劳德日记',
     badge: '04:00',
-    glyph: '📓',
+    Icon: DiaryLineIcon,
   },
   {
     id: 'calendar',
     label: '生活日历',
     badge: '心情·日程',
-    glyph: '📅',
+    Icon: CalendarLineIcon,
   },
 ];
 
@@ -71,7 +85,7 @@ export default function PhoneHome({ activeApp, onSelectApp }) {
             gap: 14,
           }}
         >
-          {DESKTOP_APPS.map(({ id, label, badge, glyph }) => {
+          {DESKTOP_APPS.map(({ id, label, badge, Icon }) => {
             const isSelected = activeApp === id;
             return (
               <button
@@ -103,10 +117,9 @@ export default function PhoneHome({ activeApp, onSelectApp }) {
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    fontSize: 22,
                   }}
                 >
-                  {glyph}
+                  <Icon size={24} color="#be185d" />
                 </div>
                 <div style={{ fontSize: 14, fontWeight: 600 }}>{label}</div>
                 <div style={{ fontSize: 11, color: '#9a7b86' }}>{badge}</div>
