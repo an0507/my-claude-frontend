@@ -65,13 +65,6 @@ function isMessageDeletedInMemory(content = '', deletedMemories = []) {
   });
 }
 
-function stripQuoteTokens(text = '') {
-  return String(text || '')
-    .replace(/\[\[\s*记顾青语录(?:\|[^:\]]+)?\s*:[\s\S]*?\]\]/gi, '')
-    .replace(/\[\[\s*记顾青语录(?:\|[^\]]*)?$/gi, '')
-    .trim();
-}
-
 function recoverLegacyMessages() {
   try {
     // 1. 优先读取标准备份快照
@@ -470,10 +463,9 @@ export default function ChatApp({ onBackHome }) {
           MODEL_OPTIONS.find((m) => m.id === selectedModelRef.current) ||
           MODEL_OPTIONS[0]
         ).label;
-        const cleanedText = stripQuoteTokens(text);
-        const bubbles = splitMultiBubbles(cleanedText);
+        const bubbles = splitMultiBubbles(text);
         const list =
-          bubbles.length > 0 ? bubbles : [cleanedText.trim()].filter(Boolean);
+          bubbles.length > 0 ? bubbles : [String(text || '').trim()].filter(Boolean);
 
         for (let idx = 0; idx < list.length; idx += 1) {
           if (idx > 0) {
@@ -731,7 +723,6 @@ export default function ChatApp({ onBackHome }) {
             rawReply = accumulated;
             const safePreview = accumulated
               .replace(/\[\[(?:查日历|记日历事件):[\s\S]*$/i, '')
-              .replace(/\[\[\s*记顾青语录[\s\S]*$/i, '')
               .replace(/\[\[\s*分句\s*\]\][\s\S]*$/i, '')
               .trim();
             const previewText =
@@ -744,7 +735,7 @@ export default function ChatApp({ onBackHome }) {
 
         const eventAdd = extractCalendarEventAdd(rawReply);
         const query = extractCalendarQuery(rawReply);
-        const cleanReply = stripQuoteTokens(stripCalendarControlTokens(rawReply));
+        const cleanReply = stripCalendarControlTokens(rawReply);
 
         const feedbackParts = [];
         if (eventAdd) {
