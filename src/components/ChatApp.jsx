@@ -33,12 +33,105 @@ const DELETED_MEMORIES_KEY =
   STORAGE_KEYS.DELETED_MEMORIES || 'claude_deleted_memories_v1';
 
 const MAX_RECENT_DIARIES = 4;
-const MAX_API_HISTORY_MESSAGES = 36;
+const MAX_WINDOW_HISTORY_MESSAGES = 150;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function toSafeArray(val) {
   return Array.isArray(val) ? val : [];
+}
+
+function getCycleStartTimestamp(nowDate = new Date()) {
+  const cycleStart = new Date(nowDate);
+  cycleStart.setHours(4, 0, 0, 0);
+  if (nowDate.getTime() < cycleStart.getTime()) {
+    cycleStart.setDate(cycleStart.getDate() - 1);
+  }
+  return cycleStart.getTime();
+}
+
+function selectCycleMessages(allMessages = [], nowDate = new Date()) {
+  const safeList = toSafeArray(allMessages);
+  if (safeList.length === 0) return [];
+
+  const cycleStartTs = getCycleStartTimestamp(nowDate);
+  const inCycle = safeList.filter((msg) => {
+    const ts = Number(msg?.timestamp);
+    return Number.isFinite(ts) && ts > 0 && ts >= cycleStartTs;
+  });
+
+  const baseList = inCycle.length > 0 ? inCycle : safeList;
+  return baseList.slice(-MAX_WINDOW_HISTORY_MESSAGES);
+}
+
+function formatMonthDayOnly(ts) {
+  const d = new Date(Number(ts));
+  if (Number.isNaN(d.getTime())) return '';
+  const month = d.getMonth() + 1;
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${month}.${day}`;
+}
+
+function buildDailyDatedText(rawMessages = []) {
+  const list = toSafeArray(rawMessages);
+  const blocks = [];
+  let currentDay = '';
+  let currentLines = [];
+
+  for (const m of list) {
+    if (!m || typeof m.content !== 'string' || !m.content.trim()) continue;
+    const sender = m.role === 'user' ? '安安' : '顾青';
+    const dayLabel = formatMonthDayOnly(m.timestamp);
+
+    if (dayLabel && dayLabel !== currentDay) {
+      if (currentLines.length > 0) {
+        blocks.push(
+          currentDay
+            ? `${currentDay}\n${currentLines.join('\n')}`
+            : currentLines.join('\n')
+        );
+      }
+      currentDay = dayLabel;
+      currentLines = [];
+    }
+
+    currentLines.push(`${sender}：${m.content.trim()}`);
+  }
+
+  if (currentLines.length > 0) {
+    blocks.push(
+      currentDay
+        ? `${currentDay}\n${currentLines.join('\n')}`
+        : currentLines.join('\n')
+    );
+  }
+
+  return blocks.join('\n\n');
+}
+
+function downloadPlainTextFile(text, filename) {
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename || `chat-backup-${Date.now()}.txt`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function exportDatedChatTxt(rawMessages = [], filename) {
+  const formattedText = buildDailyDatedText(rawMessages);
+  if (!formattedText) return;
+  try {
+    const res = exportMessagesAsTxt(formattedText, filename);
+    if (res === false) {
+      downloadPlainTextFile(formattedText, filename);
+    }
+  } catch {
+    downloadPlainTextFile(formattedText, filename);
+  }
 }
 
 function normalizeTextForFilter(str = '') {
@@ -238,6 +331,7 @@ function buildDynamicTurnContext({
   const safeCurrent = toSafeArray(currentMessages).filter(
     (m) => !isMessageDeletedInMemory(m?.content, deletedMemories)
   );
+  const windowList = selectCycleMessages(safeCurrent, nowDate);
   const currentTimeStr = formatCurrentClock(nowDate);
   const diaryList = readStorageJSON(DIARY_STORAGE_KEY, []);
   const allDiaries = Array.isArray(diaryList) ? diaryList : [];
@@ -255,10 +349,7 @@ function buildDynamicTurnContext({
 - 当前现实时间（与主页时钟一致）：${currentTimeStr}
 - 当前选用模型：${selectedModel}
 - 当前回复长度设置：${responseLength}
-- 当前私聊消息总数：${safeCurrent.length} 条（本次附带最近 ${Math.min(
-    safeCurrent.length,
-    MAX_API_HISTORY_MESSAGES
-  )} 条）
+- 当前私聊消息总数：${safeCurrent.length} 条（本次附带最近 04:00 周期内 ${windowList.length} 条，上限 ${MAX_WINDOW_HISTORY_MESSAGES} 条）
 - 是否有本地备份快照：${hasBackupSnapshot ? '有' : '无'}
 - 你已写下的日记总数：${allDiaries.length} 篇
 
@@ -689,7 +780,7 @@ export default function ChatApp({ onBackHome }) {
       Math.floor(count / step) > Math.floor(lastAutoBackedCountRef.current / step)
     ) {
       lastAutoBackedCountRef.current = count;
-      exportMessagesAsTxt(list, formatBackupFilename());
+      exportDatedChatTxt(list, formatBackupFilename());
       setBackupNotice(`已自动导出备份（累计 ${count} 条消息）`);
     }
   }, [messages, loading]);
@@ -730,8 +821,7 @@ export default function ChatApp({ onBackHome }) {
   useEffect(() => {
     const cleanup = attachProactiveCalendarWatcher({
       getMessages: () =>
-        toSafeArray(messagesRef.current)
-          .slice(-MAX_API_HISTORY_MESSAGES)
+        selectCycleMessages(messagesRef.current, new Date())
           .filter(
             (m) =>
               !isMessageDeletedInMemory(m?.content, deletedMemoriesRef.current)
@@ -911,7 +1001,7 @@ export default function ChatApp({ onBackHome }) {
 
   function handleExportMessages() {
     if (loading || safeMessages.length === 0) return;
-    exportMessagesAsTxt(safeMessages);
+    exportDatedChatTxt(safeMessages);
     setBackupNotice('已手动导出聊天记录');
   }
 
@@ -957,10 +1047,10 @@ export default function ChatApp({ onBackHome }) {
       nowDate,
     });
 
-    const trimmedHistory = nextMessages.slice(-MAX_API_HISTORY_MESSAGES);
-    const filteredApiMessages = trimmedHistory.filter(
+    const cycleMessages = selectCycleMessages(nextMessages, nowDate);
+    const filteredApiMessages = cycleMessages.filter(
       (m, idx) =>
-        idx === trimmedHistory.length - 1 ||
+        idx === cycleMessages.length - 1 ||
         !isMessageDeletedInMemory(m?.content, deletedMemories)
     );
 
