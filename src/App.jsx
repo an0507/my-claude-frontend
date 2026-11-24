@@ -7,7 +7,7 @@ import PhoneHome from './components/PhoneHome';
 export default function App() {
   const [activeApp, setActiveApp] = useState('home');
 
-  const handleSelectApp = (nextApp) => {
+  const handleOpenApp = (nextApp) => {
     setActiveApp(nextApp);
   };
 
@@ -17,7 +17,7 @@ export default function App() {
 
   let content = null;
   if (activeApp === 'home') {
-    content = <PhoneHome activeApp={activeApp} onSelectApp={handleSelectApp} />;
+    content = <PhoneHome activeApp={activeApp} onOpenApp={handleOpenApp} />;
   } else if (activeApp === 'diary') {
     content = <DiaryApp onBackHome={handleBackHome} />;
   } else if (activeApp === 'calendar') {
