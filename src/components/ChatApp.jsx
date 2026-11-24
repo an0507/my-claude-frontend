@@ -47,7 +47,11 @@ function normalizeTextForFilter(str = '') {
 
 function isMessageDeletedInMemory(content = '', deletedMemories = []) {
   const normMsg = normalizeTextForFilter(content);
-  if (!normMsg || !Array.isArray(deletedMemories) || deletedMemories.length === 0) {
+  if (
+    !normMsg ||
+    !Array.isArray(deletedMemories) ||
+    deletedMemories.length === 0
+  ) {
     return false;
   }
   return deletedMemories.some((entry) => {
@@ -326,6 +330,12 @@ export default function ChatApp({ onBackHome }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [lengthMenuOpen, setLengthMenuOpen] = useState(false);
   const [managerOpen, setManagerOpen] = useState(false);
+  const [quotesModalOpen, setQuotesModalOpen] = useState(false);
+  const [quoteSection, setQuoteSection] = useState('安安');
+  const [quoteInput, setQuoteInput] = useState('');
+  const [quotesPreview, setQuotesPreview] = useState('');
+  const [quoteSaving, setQuoteSaving] = useState(false);
+  const [quoteStatus, setQuoteStatus] = useState('');
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [backupNotice, setBackupNotice] = useState('');
@@ -435,7 +445,8 @@ export default function ChatApp({ onBackHome }) {
       getMessages: () =>
         toSafeArray(messagesRef.current)
           .filter(
-            (m) => !isMessageDeletedInMemory(m?.content, deletedMemoriesRef.current)
+            (m) =>
+              !isMessageDeletedInMemory(m?.content, deletedMemoriesRef.current)
           )
           .map(({ role, content }) => ({
             role,
@@ -511,6 +522,50 @@ export default function ChatApp({ onBackHome }) {
     document.addEventListener('pointerdown', handleOutsideClick);
     return () => document.removeEventListener('pointerdown', handleOutsideClick);
   }, [lengthMenuOpen]);
+
+  async function openQuotesModal() {
+    setQuotesModalOpen(true);
+    setQuoteStatus('');
+    try {
+      const resp = await fetch(`${BACKEND_URL}/api/love-quotes`);
+      const data = await resp.json();
+      if (resp.ok && typeof data?.content === 'string') {
+        setQuotesPreview(data.content);
+      }
+    } catch {
+      setQuoteStatus('读取语录预览失败，仍可直接追加新语录');
+    }
+  }
+
+  async function handleAddLoveQuote() {
+    const clean = quoteInput.trim();
+    if (!clean || quoteSaving) return;
+    setQuoteSaving(true);
+    setQuoteStatus('');
+    try {
+      const resp = await fetch(`${BACKEND_URL}/api/love-quotes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          section: quoteSection,
+          quote: clean,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        throw new Error(data?.error || '保存失败');
+      }
+      setQuoteInput('');
+      if (typeof data?.content === 'string') {
+        setQuotesPreview(data.content);
+      }
+      setQuoteStatus(`已加入「${quoteSection}心动语录」，下次发消息立即生效`);
+    } catch (err) {
+      setQuoteStatus(err?.message || '保存失败，请稍后重试');
+    } finally {
+      setQuoteSaving(false);
+    }
+  }
 
   function toggleSelectMode() {
     if (loading || safeMessages.length === 0) return;
@@ -852,7 +907,33 @@ export default function ChatApp({ onBackHome }) {
           </h2>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            flexWrap: 'wrap',
+            justifyContent: 'flex-end',
+          }}
+        >
+          <button
+            type="button"
+            onClick={openQuotesModal}
+            disabled={loading}
+            style={{
+              padding: '6px 10px',
+              fontSize: 12,
+              borderRadius: 999,
+              border: '1px solid #f0cedb',
+              background: loading ? '#fdf2f6' : '#ffffff',
+              color: loading ? '#c4a4b0' : '#be185d',
+              cursor: loading ? 'not-allowed' : 'pointer',
+              transition: 'all 0.15s ease',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            心动语录
+          </button>
           <button
             type="button"
             onClick={toggleSelectMode}
@@ -1336,6 +1417,154 @@ export default function ChatApp({ onBackHome }) {
           </div>
         </div>
       </div>
+
+      {/* 心动语录追加弹窗 */}
+      {quotesModalOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(59, 35, 44, 0.35)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+            zIndex: 60,
+          }}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: 420,
+              background: '#fff9fb',
+              border: '1px solid #f0cedb',
+              borderRadius: 18,
+              padding: 16,
+              boxShadow: '0 14px 32px rgba(190, 24, 93, 0.16)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 12,
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <span
+                style={{ fontSize: 15, fontWeight: 700, color: '#3b232c' }}
+              >
+                心动语录（不破核心缓存）
+              </span>
+              <button
+                type="button"
+                onClick={() => setQuotesModalOpen(false)}
+                style={{
+                  border: 'none',
+                  background: 'transparent',
+                  color: '#8c6a76',
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                关闭
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              {['安安', '顾青'].map((tab) => {
+                const active = quoteSection === tab;
+                return (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => setQuoteSection(tab)}
+                    style={{
+                      flex: 1,
+                      padding: '7px 10px',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      borderRadius: 999,
+                      border: '1px solid #f0cedb',
+                      background: active ? '#ffe4ee' : '#ffffff',
+                      color: active ? '#be185d' : '#6e4d59',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {tab}心动语录
+                  </button>
+                );
+              })}
+            </div>
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                type="text"
+                value={quoteInput}
+                onChange={(e) => setQuoteInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleAddLoveQuote()}
+                placeholder={`输入一条${quoteSection}心动语录…`}
+                style={{
+                  flex: 1,
+                  padding: '9px 12px',
+                  fontSize: 14,
+                  borderRadius: 12,
+                  border: '1px solid #f2cedb',
+                  background: '#ffffff',
+                  color: '#2d1e24',
+                  outline: 'none',
+                }}
+              />
+              <button
+                type="button"
+                onClick={handleAddLoveQuote}
+                disabled={quoteSaving || !quoteInput.trim()}
+                style={{
+                  padding: '0 14px',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  borderRadius: 12,
+                  border: 'none',
+                  background:
+                    quoteSaving || !quoteInput.trim() ? '#f5c6d6' : '#e57399',
+                  color: '#ffffff',
+                  cursor:
+                    quoteSaving || !quoteInput.trim()
+                      ? 'not-allowed'
+                      : 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {quoteSaving ? '保存中' : '追加'}
+              </button>
+            </div>
+
+            {quoteStatus && (
+              <div style={{ fontSize: 12, color: '#be185d' }}>{quoteStatus}</div>
+            )}
+
+            <div
+              style={{
+                maxHeight: 180,
+                overflowY: 'auto',
+                padding: 10,
+                borderRadius: 12,
+                background: '#ffffff',
+                border: '1px solid #f7e4eb',
+                fontSize: 12,
+                lineHeight: 1.6,
+                color: '#4a2e38',
+                whiteSpace: 'pre-wrap',
+              }}
+            >
+              {quotesPreview || '（暂无心动语录内容）'}
+            </div>
+          </div>
+        </div>
+      )}
 
       <RecordManagerModal
         open={managerOpen}
