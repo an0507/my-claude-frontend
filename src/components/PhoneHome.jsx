@@ -2,7 +2,6 @@ import {
   CalendarLineIcon,
   ChatLineIcon,
   DiaryLineIcon,
-  QuotesLineIcon,
 } from './LineIcons';
 
 const DESKTOP_APPS = [
@@ -23,12 +22,6 @@ const DESKTOP_APPS = [
     label: '生活日历',
     badge: '心情·日程',
     Icon: CalendarLineIcon,
-  },
-  {
-    id: 'quotes',
-    label: '心动语录',
-    badge: '语录库',
-    Icon: QuotesLineIcon,
   },
 ];
 
@@ -90,10 +83,7 @@ export default function PhoneHome({ activeApp, onSelectApp }) {
               <button
                 key={id}
                 type="button"
-                onClick={() => {
-                  console.log('[quotes-debug] PhoneHome 点击图标:', id);
-                  onSelectApp(id);
-                }}
+                onClick={() => onSelectApp(id)}
                 style={{
                   display: 'flex',
                   flexDirection: 'column',
