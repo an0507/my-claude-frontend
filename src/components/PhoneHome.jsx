@@ -1,16 +1,8 @@
-import * as LineIcons from './LineIcons';
-
-const ChatLineIcon =
-  LineIcons.ChatLineIcon ||
-  (() => <span style={{ fontSize: 20, lineHeight: 1 }}>💬</span>);
-
-const DiaryLineIcon =
-  LineIcons.DiaryLineIcon ||
-  (() => <span style={{ fontSize: 20, lineHeight: 1 }}>📓</span>);
-
-const CalendarLineIcon =
-  LineIcons.CalendarLineIcon ||
-  (() => <span style={{ fontSize: 20, lineHeight: 1 }}>📅</span>);
+import {
+  CalendarLineIcon,
+  ChatLineIcon,
+  DiaryLineIcon,
+} from './LineIcons';
 
 const DESKTOP_APPS = [
   {
