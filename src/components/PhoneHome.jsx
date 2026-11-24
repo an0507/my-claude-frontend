@@ -1,27 +1,21 @@
-import {
-  CalendarLineIcon,
-  ChatLineIcon,
-  DiaryLineIcon,
-} from './LineIcons';
-
 const DESKTOP_APPS = [
   {
     id: 'chat',
     label: '私聊',
     badge: '顾青',
-    Icon: ChatLineIcon,
+    glyph: '💬',
   },
   {
     id: 'diary',
     label: '克劳德日记',
     badge: '04:00',
-    Icon: DiaryLineIcon,
+    glyph: '📓',
   },
   {
     id: 'calendar',
     label: '生活日历',
     badge: '心情·日程',
-    Icon: CalendarLineIcon,
+    glyph: '📅',
   },
 ];
 
@@ -77,7 +71,7 @@ export default function PhoneHome({ activeApp, onSelectApp }) {
             gap: 14,
           }}
         >
-          {DESKTOP_APPS.map(({ id, label, badge, Icon }) => {
+          {DESKTOP_APPS.map(({ id, label, badge, glyph }) => {
             const isSelected = activeApp === id;
             return (
               <button
@@ -109,9 +103,10 @@ export default function PhoneHome({ activeApp, onSelectApp }) {
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
+                    fontSize: 22,
                   }}
                 >
-                  <Icon size={24} color="#be185d" />
+                  {glyph}
                 </div>
                 <div style={{ fontSize: 14, fontWeight: 600 }}>{label}</div>
                 <div style={{ fontSize: 11, color: '#9a7b86' }}>{badge}</div>
