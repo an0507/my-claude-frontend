@@ -130,6 +130,22 @@ function splitMultiBubbles(text = '') {
     .filter(Boolean);
 }
 
+// 解析并清理克劳德主动发出的 [[搜记忆: 关键词]] 与编辑标记
+function extractMemorySearchQuery(rawText = '') {
+  const match = String(rawText || '').match(
+    /\[\[\s*搜记忆\s*:\s*([\s\S]*?)\s*\]\]/i
+  );
+  return match ? match[1].trim() : '';
+}
+
+function stripMemoryControlTokens(rawText = '') {
+  return String(rawText || '')
+    .replace(/\[\[\s*搜记忆\s*:[\s\S]*?\]\]/gi, '')
+    .replace(/\[\[\s*(?:记|改|删)记忆(?:\|[^:\]]+)?\s*:[\s\S]*?\]\]/gi, '')
+    .replace(/\[\[\s*(?:搜|记|改|删)记忆(?:\|[^\]]*)?$/gi, '')
+    .trim();
+}
+
 function formatCurrentClock(now = new Date()) {
   const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
   const year = now.getFullYear();
@@ -250,6 +266,30 @@ function buildDynamicTurnContext({
 ${recentSnippet || '（暂无近期消息）'}`;
 }
 
+async function runBackendMemorySearch(queryStr) {
+  const q = String(queryStr || '').trim();
+  if (!q) return '';
+  try {
+    const resp = await fetch(
+      `${BACKEND_URL}/api/memory-notes?q=${encodeURIComponent(q)}`
+    );
+    const data = await resp.json();
+    if (!resp.ok || !Array.isArray(data.notes) || data.notes.length === 0) {
+      return `【记忆条搜索结果（关键词：${q}）】\n未检索到匹配的记忆条。`;
+    }
+    const lines = data.notes.map((n, i) => {
+      const tagText =
+        Array.isArray(n.tags) && n.tags.length > 0
+          ? ` [${n.tags.join(' / ')}]`
+          : '';
+      return `${i + 1}. (${n.date || '未知日期'})${tagText} ${n.content}`;
+    });
+    return `【记忆条搜索结果（关键词：${q}）】\n${lines.join('\n')}`;
+  } catch (err) {
+    return `【记忆条搜索失败】${err.message || '网络异常'}`;
+  }
+}
+
 async function streamChatOnce({
   messages,
   system,
@@ -339,7 +379,7 @@ export default function ChatApp({ onBackHome }) {
   const [loading, setLoading] = useState(false);
   const [backupNotice, setBackupNotice] = useState('');
 
-  // 心动语录面板（你手动记、看、改、删）
+  // 心动语录面板
   const [quotesModalOpen, setQuotesModalOpen] = useState(false);
   const [quotesContent, setQuotesContent] = useState('');
   const [quotesLoading, setQuotesLoading] = useState(false);
@@ -349,6 +389,17 @@ export default function ChatApp({ onBackHome }) {
   const [quoteText, setQuoteText] = useState('');
   const [editTargetQuote, setEditTargetQuote] = useState('');
   const [editNewQuote, setEditNewQuote] = useState('');
+
+  // 记忆条管理面板（可查看/搜索/手动新增/修改/删除）
+  const [memoryModalOpen, setMemoryModalOpen] = useState(false);
+  const [memoryNotesList, setMemoryNotesList] = useState([]);
+  const [memoryLoading, setMemoryLoading] = useState(false);
+  const [memoryMsg, setMemoryMsg] = useState('');
+  const [memorySearchInput, setMemorySearchInput] = useState('');
+  const [memoryDateInput, setMemoryDateInput] = useState('');
+  const [memoryTagsInput, setMemoryTagsInput] = useState('');
+  const [memoryContentInput, setMemoryContentInput] = useState('');
+  const [editingMemoryId, setEditingMemoryId] = useState(null);
 
   const safeMessages = toSafeArray(messages);
 
@@ -488,11 +539,121 @@ export default function ChatApp({ onBackHome }) {
     }
   }
 
+  // 记忆条管理弹窗相关接口调用
+  async function fetchMemoryNotesList(query = '') {
+    setMemoryLoading(true);
+    setMemoryMsg('');
+    try {
+      const url = query.trim()
+        ? `${BACKEND_URL}/api/memory-notes?q=${encodeURIComponent(query.trim())}`
+        : `${BACKEND_URL}/api/memory-notes`;
+      const resp = await fetch(url);
+      const data = await resp.json();
+      if (!resp.ok || data.error) {
+        throw new Error(data.error || '读取记忆条失败');
+      }
+      setMemoryNotesList(Array.isArray(data.notes) ? data.notes : []);
+    } catch (err) {
+      setMemoryMsg(err.message || '读取记忆条失败');
+    } finally {
+      setMemoryLoading(false);
+    }
+  }
+
+  async function handleSaveMemoryNote() {
+    const cleanContent = memoryContentInput.trim();
+    if (!cleanContent || memoryLoading) return;
+    setMemoryLoading(true);
+    setMemoryMsg('');
+    try {
+      const isEdit = Boolean(editingMemoryId);
+      const resp = await fetch(`${BACKEND_URL}/api/memory-notes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(
+          isEdit
+            ? {
+                action: 'edit',
+                id: editingMemoryId,
+                newDate: memoryDateInput.trim() || undefined,
+                newTags: memoryTagsInput.trim(),
+                newContent: cleanContent,
+              }
+            : {
+                action: 'add',
+                date: memoryDateInput.trim() || undefined,
+                tags: memoryTagsInput.trim(),
+                content: cleanContent,
+              }
+        ),
+      });
+      const data = await resp.json();
+      if (!resp.ok || data.error) {
+        throw new Error(data.error || '保存记忆条失败');
+      }
+      setMemoryNotesList(Array.isArray(data.notes) ? data.notes : []);
+      setMemoryContentInput('');
+      setMemoryTagsInput('');
+      setMemoryDateInput('');
+      setEditingMemoryId(null);
+      setMemoryMsg(isEdit ? '已更新该条记忆' : '已记入记忆条仓库');
+    } catch (err) {
+      setMemoryMsg(err.message || '保存失败');
+    } finally {
+      setMemoryLoading(false);
+    }
+  }
+
+  async function handleRemoveMemoryNote(id) {
+    if (!id || memoryLoading) return;
+    setMemoryLoading(true);
+    setMemoryMsg('');
+    try {
+      const resp = await fetch(`${BACKEND_URL}/api/memory-notes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete', id }),
+      });
+      const data = await resp.json();
+      if (!resp.ok || data.error) {
+        throw new Error(data.error || '删除记忆条失败');
+      }
+      setMemoryNotesList(Array.isArray(data.notes) ? data.notes : []);
+      if (editingMemoryId === id) {
+        setEditingMemoryId(null);
+        setMemoryContentInput('');
+        setMemoryTagsInput('');
+        setMemoryDateInput('');
+      }
+      setMemoryMsg('已删除该记忆条');
+    } catch (err) {
+      setMemoryMsg(err.message || '删除失败');
+    } finally {
+      setMemoryLoading(false);
+    }
+  }
+
+  function startEditMemoryNote(note) {
+    setEditingMemoryId(note.id);
+    setMemoryDateInput(note.date || '');
+    setMemoryTagsInput(Array.isArray(note.tags) ? note.tags.join(', ') : '');
+    setMemoryContentInput(note.content || '');
+    setMemoryMsg('正在编辑选中记忆条，改完点击“保存修改”');
+  }
+
   useEffect(() => {
     if (quotesModalOpen) {
       fetchLoveQuotes();
     }
   }, [quotesModalOpen]);
+
+  useEffect(() => {
+    if (memoryModalOpen) {
+      setMemorySearchInput('');
+      setEditingMemoryId(null);
+      fetchMemoryNotesList('');
+    }
+  }, [memoryModalOpen]);
 
   useEffect(() => {
     const list = toSafeArray(messages);
@@ -596,9 +757,12 @@ export default function ChatApp({ onBackHome }) {
           MODEL_OPTIONS.find((m) => m.id === selectedModelRef.current) ||
           MODEL_OPTIONS[0]
         ).label;
-        const bubbles = splitMultiBubbles(text);
+        const cleanedText = stripMemoryControlTokens(text);
+        const bubbles = splitMultiBubbles(cleanedText);
         const list =
-          bubbles.length > 0 ? bubbles : [String(text || '').trim()].filter(Boolean);
+          bubbles.length > 0
+            ? bubbles
+            : [String(cleanedText || '').trim()].filter(Boolean);
 
         for (let idx = 0; idx < list.length; idx += 1) {
           if (idx > 0) {
@@ -856,7 +1020,8 @@ export default function ChatApp({ onBackHome }) {
           onChunk: (_chunk, accumulated) => {
             rawReply = accumulated;
             const safePreview = accumulated
-              .replace(/\[\[(?:查日历|记日历事件):[\s\S]*$/i, '')
+              .replace(/\[\[(?:查日历|记日历事件|搜记忆|记记忆|改记忆|删记忆):[\s\S]*$/i, '')
+              .replace(/\[\[\s*(?:记|改|删)记忆\|[\s\S]*$/i, '')
               .replace(/\[\[\s*分句\s*\]\][\s\S]*$/i, '')
               .trim();
             const previewText =
@@ -868,15 +1033,24 @@ export default function ChatApp({ onBackHome }) {
         });
 
         const eventAdd = extractCalendarEventAdd(rawReply);
-        const query = extractCalendarQuery(rawReply);
-        const cleanReply = stripCalendarControlTokens(rawReply);
+        const calQuery = extractCalendarQuery(rawReply);
+        const memQuery = extractMemorySearchQuery(rawReply);
+        const cleanReply = stripMemoryControlTokens(
+          stripCalendarControlTokens(rawReply)
+        );
 
         const feedbackParts = [];
         if (eventAdd) {
           feedbackParts.push(runCalendarEventAdd(eventAdd));
         }
-        if (query && rounds < 2) {
-          feedbackParts.push(runCalendarQuery(query.dateSpec, query.scopes));
+        if (calQuery && rounds < 2) {
+          feedbackParts.push(runCalendarQuery(calQuery.dateSpec, calQuery.scopes));
+        }
+        if (memQuery && rounds < 2) {
+          const memResult = await runBackendMemorySearch(memQuery);
+          if (memResult) {
+            feedbackParts.push(memResult);
+          }
         }
 
         if (feedbackParts.length === 0 || rounds >= 2) {
@@ -895,7 +1069,7 @@ export default function ChatApp({ onBackHome }) {
           { role: 'assistant', content: rawReply },
           {
             role: 'user',
-            content: `${feedbackParts.join('\n')}\n\n（以上是你刚完成的日历操作/查阅结果，请自然接着回应我，不要再输出日历指令。）`,
+            content: `${feedbackParts.join('\n\n')}\n\n（以上是你刚主动查阅/操作的结果，请自然接着回应我，不要再输出方括号指令。）`,
           },
         ];
       }
@@ -1001,6 +1175,24 @@ export default function ChatApp({ onBackHome }) {
             justifyContent: 'flex-end',
           }}
         >
+          <button
+            type="button"
+            onClick={() => setMemoryModalOpen(true)}
+            disabled={loading}
+            style={{
+              padding: '6px 10px',
+              fontSize: 12,
+              fontWeight: 600,
+              borderRadius: 999,
+              border: '1px solid #f3b8ce',
+              background: '#fff0f5',
+              color: '#be185d',
+              cursor: loading ? 'not-allowed' : 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            记忆条
+          </button>
           <button
             type="button"
             onClick={() => setQuotesModalOpen(true)}
@@ -1503,6 +1695,333 @@ export default function ChatApp({ onBackHome }) {
         </div>
       </div>
 
+      {/* 按需记忆条管理弹窗 */}
+      {memoryModalOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(59, 35, 44, 0.35)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 14,
+            zIndex: 60,
+          }}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: 460,
+              maxHeight: '86dvh',
+              overflowY: 'auto',
+              background: '#fff9fb',
+              border: '1px solid #f0cedb',
+              borderRadius: 18,
+              padding: 16,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+              boxShadow: '0 16px 40px rgba(190, 24, 93, 0.2)',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <h3 style={{ margin: 0, fontSize: 15, color: '#3b232c' }}>
+                按需记忆条（顾青可自主增删改与搜索）
+              </h3>
+              <button
+                type="button"
+                onClick={() => setMemoryModalOpen(false)}
+                style={{
+                  padding: '4px 10px',
+                  fontSize: 12,
+                  borderRadius: 999,
+                  border: '1px solid #f0cedb',
+                  background: '#ffffff',
+                  color: '#6e4d59',
+                  cursor: 'pointer',
+                }}
+              >
+                关闭
+              </button>
+            </div>
+
+            {/* 按关键词检索 */}
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input
+                value={memorySearchInput}
+                onChange={(e) => setMemorySearchInput(e.target.value)}
+                placeholder="输入关键词或日期搜索记忆条…"
+                style={{
+                  flex: 1,
+                  padding: '7px 10px',
+                  fontSize: 12,
+                  borderRadius: 10,
+                  border: '1px solid #f2cedb',
+                  background: '#ffffff',
+                  color: '#2d1e24',
+                }}
+              />
+              <button
+                type="button"
+                disabled={memoryLoading}
+                onClick={() => fetchMemoryNotesList(memorySearchInput)}
+                style={{
+                  padding: '0 12px',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  borderRadius: 10,
+                  border: '1px solid #f0cedb',
+                  background: '#ffffff',
+                  color: '#be185d',
+                  cursor: 'pointer',
+                }}
+              >
+                搜索
+              </button>
+              {memorySearchInput && (
+                <button
+                  type="button"
+                  disabled={memoryLoading}
+                  onClick={() => {
+                    setMemorySearchInput('');
+                    fetchMemoryNotesList('');
+                  }}
+                  style={{
+                    padding: '0 10px',
+                    fontSize: 12,
+                    borderRadius: 10,
+                    border: '1px solid #f0cedb',
+                    background: '#fff0f5',
+                    color: '#6e4d59',
+                    cursor: 'pointer',
+                  }}
+                >
+                  全部
+                </button>
+              )}
+            </div>
+
+            {/* 手动新增或编辑 */}
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 6,
+                padding: 10,
+                borderRadius: 12,
+                background: '#fff0f5',
+                border: '1px solid #f7dce6',
+              }}
+            >
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input
+                  value={memoryDateInput}
+                  onChange={(e) => setMemoryDateInput(e.target.value)}
+                  placeholder="日期如 11.24（可空）"
+                  style={{
+                    width: 118,
+                    padding: '6px 10px',
+                    fontSize: 12,
+                    borderRadius: 8,
+                    border: '1px solid #f2cedb',
+                    background: '#ffffff',
+                    color: '#2d1e24',
+                  }}
+                />
+                <input
+                  value={memoryTagsInput}
+                  onChange={(e) => setMemoryTagsInput(e.target.value)}
+                  placeholder="关键词，用逗号隔开（如：忌口, 香菜）"
+                  style={{
+                    flex: 1,
+                    padding: '6px 10px',
+                    fontSize: 12,
+                    borderRadius: 8,
+                    border: '1px solid #f2cedb',
+                    background: '#ffffff',
+                    color: '#2d1e24',
+                  }}
+                />
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input
+                  value={memoryContentInput}
+                  onChange={(e) => setMemoryContentInput(e.target.value)}
+                  placeholder="一句话记住的关键事实或约定…"
+                  style={{
+                    flex: 1,
+                    padding: '7px 10px',
+                    fontSize: 12,
+                    borderRadius: 8,
+                    border: '1px solid #f2cedb',
+                    background: '#ffffff',
+                    color: '#2d1e24',
+                  }}
+                />
+                <button
+                  type="button"
+                  disabled={memoryLoading || !memoryContentInput.trim()}
+                  onClick={handleSaveMemoryNote}
+                  style={{
+                    padding: '0 12px',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    borderRadius: 8,
+                    border: 'none',
+                    background:
+                      memoryLoading || !memoryContentInput.trim()
+                        ? '#f5c6d6'
+                        : '#e57399',
+                    color: '#ffffff',
+                    cursor:
+                      memoryLoading || !memoryContentInput.trim()
+                        ? 'not-allowed'
+                        : 'pointer',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {editingMemoryId ? '保存修改' : '记一条'}
+                </button>
+                {editingMemoryId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingMemoryId(null);
+                      setMemoryDateInput('');
+                      setMemoryTagsInput('');
+                      setMemoryContentInput('');
+                      setMemoryMsg('');
+                    }}
+                    style={{
+                      padding: '0 8px',
+                      fontSize: 12,
+                      borderRadius: 8,
+                      border: '1px solid #f0cedb',
+                      background: '#ffffff',
+                      color: '#6e4d59',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    取消
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {memoryMsg && (
+              <div style={{ fontSize: 12, color: '#be185d' }}>{memoryMsg}</div>
+            )}
+
+            {/* 列表 */}
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 6,
+                maxHeight: 240,
+                overflowY: 'auto',
+              }}
+            >
+              {memoryNotesList.length === 0 ? (
+                <div
+                  style={{
+                    padding: 14,
+                    textAlign: 'center',
+                    fontSize: 12,
+                    color: '#8c6a76',
+                    background: '#ffffff',
+                    borderRadius: 12,
+                    border: '1px solid #f5dbe4',
+                  }}
+                >
+                  {memoryLoading ? '加载中…' : '暂无记忆条'}
+                </div>
+              ) : (
+                [...memoryNotesList].reverse().map((note) => (
+                  <div
+                    key={note.id}
+                    style={{
+                      padding: '8px 10px',
+                      borderRadius: 12,
+                      background: '#ffffff',
+                      border: '1px solid #f5dbe4',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'flex-start',
+                      gap: 8,
+                    }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: '#9a7b86',
+                          marginBottom: 2,
+                        }}
+                      >
+                        {note.date || '未知日期'}
+                        {Array.isArray(note.tags) && note.tags.length > 0
+                          ? ` · ${note.tags.join(' / ')}`
+                          : ''}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 13,
+                          color: '#3b232c',
+                          lineHeight: 1.5,
+                          wordBreak: 'break-word',
+                        }}
+                      >
+                        {note.content}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      <button
+                        type="button"
+                        onClick={() => startEditMemoryNote(note)}
+                        style={{
+                          padding: '3px 8px',
+                          fontSize: 11,
+                          borderRadius: 8,
+                          border: '1px solid #f0cedb',
+                          background: '#fff9fb',
+                          color: '#be185d',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        改
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveMemoryNote(note.id)}
+                        style={{
+                          padding: '3px 8px',
+                          fontSize: 11,
+                          borderRadius: 8,
+                          border: '1px solid #f5b8ce',
+                          background: '#ffe4ee',
+                          color: '#9d174d',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        删
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 你自己记/看/改/删心动语录的弹窗 */}
       {quotesModalOpen && (
         <div
@@ -1609,7 +2128,6 @@ export default function ChatApp({ onBackHome }) {
               />
             </div>
 
-            {/* 新增一条 */}
             <div style={{ display: 'flex', gap: 8 }}>
               <input
                 value={quoteText}
@@ -1649,7 +2167,6 @@ export default function ChatApp({ onBackHome }) {
               </button>
             </div>
 
-            {/* 修改或删除已有单条 */}
             <div
               style={{
                 display: 'flex',
@@ -1734,7 +2251,6 @@ export default function ChatApp({ onBackHome }) {
               <div style={{ fontSize: 12, color: '#be185d' }}>{quotesMsg}</div>
             )}
 
-            {/* 当前文件内容预览 */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <div
                 style={{
