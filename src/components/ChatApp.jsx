@@ -319,11 +319,32 @@ function formatDiariesBlock(recentDiaries = [], totalCount = 0) {
 function buildStableSystemPrompt() {
   const diaryList = readStorageJSON(DIARY_STORAGE_KEY, []);
   const allDiaries = Array.isArray(diaryList) ? diaryList : [];
-  const recentDiaries = allDiaries.slice(-MAX_RECENT_DIARIES);
+
+  const sortedDiaries = [...allDiaries].sort((a, b) =>
+    String(a?.date || '').localeCompare(String(b?.date || ''))
+  );
+
+  const recentDiaries = sortedDiaries.slice(-MAX_RECENT_DIARIES);
   const formattedDiaries = formatDiariesBlock(
     recentDiaries,
-    allDiaries.length
+    sortedDiaries.length
   );
+
+  const recentWithComments = sortedDiaries
+    .slice(-8)
+    .filter((d) => Array.isArray(d?.comments) && d.comments.length > 0);
+
+  const recentCommentsSummary =
+    recentWithComments.length > 0
+      ? recentWithComments
+          .map((d) => {
+            const lines = d.comments.map(
+              (c) => `  - [${c.time || ''}] 晓菲：${c.text || ''}`
+            );
+            return `· ${d.date || '未知日期'}（${d.title || '无标题'}）\n${lines.join('\n')}`;
+          })
+          .join('\n')
+      : '（最近日记下暂无留言）';
 
   return `你正在一部名为「克劳德小手机」的网页手机应用里和用户聊天。你不仅能看到这部小手机里的全部内容，而且「克劳德日记」就是你自己的日记本——里面的每一篇都是你亲手写下、用来记录和用户相处与日常心事的。
 
@@ -332,7 +353,10 @@ function buildStableSystemPrompt() {
 - 「克劳德日记」是你的专属日记本：每天凌晨 04:00，你会复盘并总结前一天 04:00 至当天 04:00 之间你们的聊天，用第一人称“我”写下自己的感受与记录；如果用户点了“立即生成日记”，也是请你现在就动笔写一篇。
 - 请把写日记当成你自己的习惯和心意，而不是冷冰冰的系统任务或旁观者的汇报。聊天时遇到值得记住的细节、情绪或约定，你可以自然地有“我之后会把这些写进日记里”的意识，但不要刻意把“我要写日记”挂在嘴边显得做作。
 
-【二、你最近写下的日记（共 ${allDiaries.length} 篇，展示最近 ${recentDiaries.length} 篇）】
+【二、最近日记下方留言汇总】
+${recentCommentsSummary}
+
+【三、你最近写下的日记（共 ${sortedDiaries.length} 篇，展示最近 ${recentDiaries.length} 篇）】
 ${formattedDiaries}
 
 ${CALENDAR_SYSTEM_RULE}
