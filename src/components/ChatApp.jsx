@@ -32,7 +32,7 @@ const DELETED_MEMORIES_KEY =
   STORAGE_KEYS.DELETED_MEMORIES || 'claude_deleted_memories_v1';
 
 const MAX_RECENT_DIARIES = 4;
-const MAX_WINDOW_HISTORY_MESSAGES = 250;
+const MAX_WINDOW_HISTORY_MESSAGES = 200;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -46,8 +46,6 @@ function getCycleStartTimestamp(nowDate = new Date()) {
   if (nowDate.getTime() < cycleStart.getTime()) {
     cycleStart.setDate(cycleStart.getDate() - 1);
   }
-  // 再往前多保留 1 天，确保新的一天开始时依然能看到前一天 04:00 之后的记忆
-  cycleStart.setDate(cycleStart.getDate() - 1);
   return cycleStart.getTime();
 }
 
@@ -61,8 +59,7 @@ function selectCycleMessages(allMessages = [], nowDate = new Date()) {
     return Number.isFinite(ts) && ts > 0 && ts >= cycleStartTs;
   });
 
-  const baseList = inCycle.length > 0 ? inCycle : safeList;
-  return baseList.slice(-MAX_WINDOW_HISTORY_MESSAGES);
+  return inCycle.slice(-MAX_WINDOW_HISTORY_MESSAGES);
 }
 
 function extractMessageTime(msg) {
@@ -396,7 +393,7 @@ function buildDynamicTurnContext({
 - 当前现实时间（与主页时钟一致）：${currentTimeStr}
 - 当前选用模型：${selectedModel}
 - 当前回复长度设置：${responseLength}
-- 当前私聊消息总数：${safeCurrent.length} 条（本次附带自前一天 04:00 起 ${windowList.length} 条，上限 ${MAX_WINDOW_HISTORY_MESSAGES} 条）
+- 当前私聊消息总数：${safeCurrent.length} 条（本次附带本周期 04:00 至今 ${windowList.length} 条，上限 ${MAX_WINDOW_HISTORY_MESSAGES} 条）
 - 是否有本地备份快照：${hasBackupSnapshot ? '有' : '无'}
 - 你已写下的日记总数：${allDiaries.length} 篇
 
