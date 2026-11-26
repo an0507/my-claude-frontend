@@ -242,6 +242,21 @@ function splitMultiBubbles(text = '') {
     .filter(Boolean);
 }
 
+// 解析并清理克劳德主动发出的 [[搜历史: 关键词或日期]]
+function extractHistorySearchQuery(rawText = '') {
+  const match = String(rawText || '').match(
+    /\[\[\s*搜历史\s*:\s*([\s\S]*?)\s*\]\]/i
+  );
+  return match ? match[1].trim() : '';
+}
+
+function stripHistoryControlTokens(rawText = '') {
+  return String(rawText || '')
+    .replace(/\[\[\s*搜历史\s*:[\s\S]*?\]\]/gi, '')
+    .replace(/\[\[\s*搜历史(?:\|[^\]]*)?$/gi, '')
+    .trim();
+}
+
 // 解析并清理克劳德主动发出的 [[搜记忆: 关键词]] 与编辑标记
 function extractMemorySearchQuery(rawText = '') {
   const match = String(rawText || '').match(
@@ -389,7 +404,7 @@ function formatMessageTime(ts, now = new Date()) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hhmm}`;
 }
 
-// 稳定 system 规则：不再每轮塞入日记全文/留言汇总，改为按需 [[搜日记:...]] 调取
+// 稳定 system 规则：日记与早期聊天记录均改为按需检索，控制缓存体积与命中率
 function buildStableSystemPrompt() {
   return `你正在一部名为「克劳德小手机」的网页手机应用里和用户聊天。你不仅能看到这部小手机里的全部内容，而且「克劳德日记」就是你自己的日记本——里面的每一篇都是你亲手写下、用来记录和用户相处与日常心事的。
 
@@ -406,7 +421,7 @@ ${CALENDAR_SYSTEM_RULE}
 - 如果你想像真人聊天那样连发多条短消息，可以用 [[分句]] 把不同气泡隔开（一般 2～4 条即可，保持自然克制，不要过度刷屏）；如果只想回一条，直接正常说话即可，不要加 [[分句]]。`;
 }
 
-// 轻量动态上下文（放在最后一条 user 消息末尾，尽量精简，避免无意义长文本每轮重算）
+// 轻量动态上下文（放在最后一条 user 消息末尾）
 function buildDynamicTurnContext({
   currentMessages = [],
   deletedMemories = [],
@@ -429,6 +444,23 @@ function buildDynamicTurnContext({
 - 本周期消息数：${windowList.length} 条（累计 ${safeCurrent.length} 条）｜已存日记：${diaryCount} 篇｜本地备份：${
     hasBackupSnapshot ? '有' : '无'
   }`;
+}
+
+async function runBackendHistorySearch(queryStr) {
+  const q = String(queryStr || '').trim();
+  if (!q) return '';
+  try {
+    const resp = await fetch(
+      `${BACKEND_URL}/api/history-search?q=${encodeURIComponent(q)}`
+    );
+    const data = await resp.json();
+    if (!resp.ok || data.error) {
+      return `【历史记录检索失败】${data.error || '网络异常'}`;
+    }
+    return data.result || `【历史聊天记录检索结果（查询：${q}）】无结果。`;
+  } catch (err) {
+    return `【历史记录检索失败】${err.message || '网络异常'}`;
+  }
 }
 
 async function runBackendMemorySearch(queryStr) {
@@ -920,8 +952,8 @@ export default function ChatApp({ onBackHome }) {
           MODEL_OPTIONS.find((m) => m.id === selectedModelRef.current) ||
           MODEL_OPTIONS[0]
         ).label;
-        const cleanedText = stripDiaryControlTokens(
-          stripMemoryControlTokens(text)
+        const cleanedText = stripHistoryControlTokens(
+          stripDiaryControlTokens(stripMemoryControlTokens(text))
         );
         const bubbles = splitMultiBubbles(cleanedText);
         const list =
@@ -1186,7 +1218,7 @@ export default function ChatApp({ onBackHome }) {
             rawReply = accumulated;
             const safePreview = accumulated
               .replace(
-                /\[\[(?:查日历|记日历事件|搜记忆|搜日记|记记忆|改记忆|删记忆):[\s\S]*$/i,
+                /\[\[(?:查日历|记日历事件|搜记忆|搜历史|搜日记|记记忆|改记忆|删记忆):[\s\S]*$/i,
                 ''
               )
               .replace(/\[\[\s*(?:记|改|删)记忆\|[\s\S]*$/i, '')
@@ -1203,9 +1235,12 @@ export default function ChatApp({ onBackHome }) {
         const eventAdd = extractCalendarEventAdd(rawReply);
         const calQuery = extractCalendarQuery(rawReply);
         const memQuery = extractMemorySearchQuery(rawReply);
+        const historyQuery = extractHistorySearchQuery(rawReply);
         const diaryQuery = extractDiarySearchQuery(rawReply);
-        const cleanReply = stripDiaryControlTokens(
-          stripMemoryControlTokens(stripCalendarControlTokens(rawReply))
+        const cleanReply = stripHistoryControlTokens(
+          stripDiaryControlTokens(
+            stripMemoryControlTokens(stripCalendarControlTokens(rawReply))
+          )
         );
 
         const feedbackParts = [];
@@ -1221,6 +1256,12 @@ export default function ChatApp({ onBackHome }) {
           const memResult = await runBackendMemorySearch(memQuery);
           if (memResult) {
             feedbackParts.push(memResult);
+          }
+        }
+        if (historyQuery && rounds < 2) {
+          const historyResult = await runBackendHistorySearch(historyQuery);
+          if (historyResult) {
+            feedbackParts.push(historyResult);
           }
         }
         if (diaryQuery && rounds < 2) {
