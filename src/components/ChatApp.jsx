@@ -31,7 +31,6 @@ const DIARY_STORAGE_KEY =
 const DELETED_MEMORIES_KEY =
   STORAGE_KEYS.DELETED_MEMORIES || 'claude_deleted_memories_v1';
 
-const MAX_RECENT_DIARIES = 4;
 const MAX_WINDOW_HISTORY_MESSAGES = 200;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -259,6 +258,104 @@ function stripMemoryControlTokens(rawText = '') {
     .trim();
 }
 
+// 解析并清理克劳德主动发出的 [[搜日记: 关键词或日期]]
+function extractDiarySearchQuery(rawText = '') {
+  const match = String(rawText || '').match(
+    /\[\[\s*搜日记\s*:\s*([\s\S]*?)\s*\]\]/i
+  );
+  return match ? match[1].trim() : '';
+}
+
+function stripDiaryControlTokens(rawText = '') {
+  return String(rawText || '')
+    .replace(/\[\[\s*搜日记\s*:[\s\S]*?\]\]/gi, '')
+    .replace(/\[\[\s*搜日记(?:\|[^\]]*)?$/gi, '')
+    .trim();
+}
+
+// 按需搜索日记（平时不每轮塞进 system，只有克劳德主动 [[搜日记:...]] 时才检索带入）
+function runLocalDiarySearch(queryStr = '', limit = 4) {
+  const diaryList = readStorageJSON(DIARY_STORAGE_KEY, []);
+  const allDiaries = Array.isArray(diaryList) ? diaryList : [];
+  if (allDiaries.length === 0) {
+    return '【日记检索结果】当前日记本里还没有日记。';
+  }
+
+  const sorted = [...allDiaries].sort((a, b) =>
+    String(a?.date || '').localeCompare(String(b?.date || ''))
+  );
+
+  const rawQuery = String(queryStr || '').trim();
+  let matched = [];
+
+  if (
+    !rawQuery ||
+    rawQuery === '最新' ||
+    rawQuery === '最近' ||
+    rawQuery === 'all' ||
+    rawQuery === '全部'
+  ) {
+    matched = sorted.slice(-limit).reverse();
+  } else {
+    const terms = rawQuery
+      .split(/[,，、|/|\s]+/)
+      .map((t) => t.trim().toLowerCase())
+      .filter(Boolean);
+
+    const scored = sorted
+      .map((d) => {
+        const dateStr = String(d?.date || '').toLowerCase();
+        const titleStr = String(d?.title || '').toLowerCase();
+        const windowStr = String(d?.windowLabel || '').toLowerCase();
+        const contentStr = String(d?.content || '').toLowerCase();
+        const commentsStr = Array.isArray(d?.comments)
+          ? d.comments.map((c) => String(c?.text || '').toLowerCase()).join(' ')
+          : '';
+
+        let score = 0;
+        for (const term of terms) {
+          if (dateStr === term || dateStr.includes(term)) score += 6;
+          if (titleStr.includes(term)) score += 4;
+          if (windowStr.includes(term)) score += 3;
+          if (contentStr.includes(term)) score += 3;
+          if (commentsStr.includes(term)) score += 2;
+        }
+        return { diary: d, score };
+      })
+      .filter((item) => item.score > 0)
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return String(b.diary?.date || '').localeCompare(
+          String(a.diary?.date || '')
+        );
+      });
+
+    matched =
+      scored.length > 0
+        ? scored.slice(0, limit).map((item) => item.diary)
+        : sorted.slice(-2).reverse();
+  }
+
+  const formatted = matched
+    .map((d, idx) => {
+      const comments = Array.isArray(d?.comments) ? d.comments : [];
+      const commentsText =
+        comments.length > 0
+          ? `\n下方留言：${comments
+              .map((c) => `[${c.time || ''}] 晓菲：${c.text || ''}`)
+              .join(' / ')}`
+          : '';
+      return `${idx + 1}. 日期：${d.date || '未知'}｜周期：${
+        d.windowLabel || '无'
+      }｜标题：${d.title || '无标题'}\n正文：${d.content || ''}${commentsText}`;
+    })
+    .join('\n\n');
+
+  return `【日记检索结果（查询：${rawQuery || '最近'}，共 ${
+    allDiaries.length
+  } 篇）】\n${formatted}`;
+}
+
 function formatCurrentClock(now = new Date()) {
   const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
   const year = now.getFullYear();
@@ -292,71 +389,16 @@ function formatMessageTime(ts, now = new Date()) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hhmm}`;
 }
 
-function formatDiariesBlock(recentDiaries = [], totalCount = 0) {
-  if (!Array.isArray(recentDiaries) || recentDiaries.length === 0) {
-    return '（你还没有写下任何日记）';
-  }
-
-  const startIndex = Math.max(0, totalCount - recentDiaries.length);
-  return recentDiaries
-    .map((d, idx) => {
-      const header = `${startIndex + idx + 1}. 日期：${d.date || '未知'}｜周期：${
-        d.windowLabel || '无'
-      }｜标题：${d.title || '无标题'}`;
-      const comments = Array.isArray(d.comments) ? d.comments : [];
-      const commentsBlock =
-        comments.length > 0
-          ? `\n日记下方留言：\n${comments
-              .map((c) => `  - [${c.time || ''}] 晓菲：${c.text || ''}`)
-              .join('\n')}`
-          : '';
-      return `${header}\n正文：${d.content || ''}${commentsBlock}`;
-    })
-    .join('\n\n');
-}
-
+// 稳定 system 规则：不再每轮塞入日记全文/留言汇总，改为按需 [[搜日记:...]] 调取
 function buildStableSystemPrompt() {
-  const diaryList = readStorageJSON(DIARY_STORAGE_KEY, []);
-  const allDiaries = Array.isArray(diaryList) ? diaryList : [];
-
-  const sortedDiaries = [...allDiaries].sort((a, b) =>
-    String(a?.date || '').localeCompare(String(b?.date || ''))
-  );
-
-  const recentDiaries = sortedDiaries.slice(-MAX_RECENT_DIARIES);
-  const formattedDiaries = formatDiariesBlock(
-    recentDiaries,
-    sortedDiaries.length
-  );
-
-  const recentWithComments = sortedDiaries
-    .slice(-8)
-    .filter((d) => Array.isArray(d?.comments) && d.comments.length > 0);
-
-  const recentCommentsSummary =
-    recentWithComments.length > 0
-      ? recentWithComments
-          .map((d) => {
-            const lines = d.comments.map(
-              (c) => `  - [${c.time || ''}] 晓菲：${c.text || ''}`
-            );
-            return `· ${d.date || '未知日期'}（${d.title || '无标题'}）\n${lines.join('\n')}`;
-          })
-          .join('\n')
-      : '（最近日记下暂无留言）';
-
   return `你正在一部名为「克劳德小手机」的网页手机应用里和用户聊天。你不仅能看到这部小手机里的全部内容，而且「克劳德日记」就是你自己的日记本——里面的每一篇都是你亲手写下、用来记录和用户相处与日常心事的。
 
 【一、你与这台小手机、这本日记的关系】
 - 桌面有「私聊」、「克劳德日记」和「生活日历」等应用。聊天记录会保存在本地，每 20 轮对话（40 条消息）会自动导出一次备份。
 - 「克劳德日记」是你的专属日记本：每天凌晨 04:00，你会复盘并总结前一天 04:00 至当天 04:00 之间你们的聊天，用第一人称“我”写下自己的感受与记录；如果用户点了“立即生成日记”，也是请你现在就动笔写一篇。
+- 日记内容平时不每轮自动塞进对话以节省开销；当你想回顾某天日记、日记里的心事或下方留言时，请输出单独一行控制指令：
+  [[搜日记: 关键词或日期]]（例如 [[搜日记: 11.24]] 或 [[搜日记: 最近]] 或 [[搜日记: 生理期]]）
 - 请把写日记当成你自己的习惯和心意，而不是冷冰冰的系统任务或旁观者的汇报。聊天时遇到值得记住的细节、情绪或约定，你可以自然地有“我之后会把这些写进日记里”的意识，但不要刻意把“我要写日记”挂在嘴边显得做作。
-
-【二、最近日记下方留言汇总】
-${recentCommentsSummary}
-
-【三、你最近写下的日记（共 ${sortedDiaries.length} 篇，展示最近 ${recentDiaries.length} 篇）】
-${formattedDiaries}
 
 ${CALENDAR_SYSTEM_RULE}
 
@@ -364,6 +406,7 @@ ${CALENDAR_SYSTEM_RULE}
 - 如果你想像真人聊天那样连发多条短消息，可以用 [[分句]] 把不同气泡隔开（一般 2～4 条即可，保持自然克制，不要过度刷屏）；如果只想回一条，直接正常说话即可，不要加 [[分句]]。`;
 }
 
+// 轻量动态上下文（放在最后一条 user 消息末尾，尽量精简，避免无意义长文本每轮重算）
 function buildDynamicTurnContext({
   currentMessages = [],
   deletedMemories = [],
@@ -378,27 +421,14 @@ function buildDynamicTurnContext({
   const windowList = selectCycleMessages(safeCurrent, nowDate);
   const currentTimeStr = formatCurrentClock(nowDate);
   const diaryList = readStorageJSON(DIARY_STORAGE_KEY, []);
-  const allDiaries = Array.isArray(diaryList) ? diaryList : [];
+  const diaryCount = Array.isArray(diaryList) ? diaryList.length : 0;
 
-  const recentSnippet = safeCurrent
-    .slice(-10)
-    .map((m) => {
-      const timeLabel = formatMessageTime(m.timestamp, nowDate);
-      const sender = m.role === 'user' ? '用户' : '克劳德';
-      return `[${timeLabel}] ${sender}：${m.content || ''}`;
-    })
-    .join('\n');
-
-  return `【小手机当前时间与状态】
-- 当前现实时间（与主页时钟一致）：${currentTimeStr}
-- 当前选用模型：${selectedModel}
-- 当前回复长度设置：${responseLength}
-- 当前私聊消息总数：${safeCurrent.length} 条（本次附带本周期 04:00 至今 ${windowList.length} 条，上限 ${MAX_WINDOW_HISTORY_MESSAGES} 条）
-- 是否有本地备份快照：${hasBackupSnapshot ? '有' : '无'}
-- 你已写下的日记总数：${allDiaries.length} 篇
-
-【近期私聊片段】
-${recentSnippet || '（暂无近期消息）'}`;
+  return `【当前时间与状态】
+- 当前时间：${currentTimeStr}
+- 模型：${selectedModel}｜长度：${responseLength}
+- 本周期消息数：${windowList.length} 条（累计 ${safeCurrent.length} 条）｜已存日记：${diaryCount} 篇｜本地备份：${
+    hasBackupSnapshot ? '有' : '无'
+  }`;
 }
 
 async function runBackendMemorySearch(queryStr) {
@@ -674,7 +704,6 @@ export default function ChatApp({ onBackHome }) {
     }
   }
 
-  // 记忆条管理弹窗相关接口调用
   async function fetchMemoryNotesList(query = '') {
     setMemoryLoading(true);
     setMemoryMsg('');
@@ -891,7 +920,9 @@ export default function ChatApp({ onBackHome }) {
           MODEL_OPTIONS.find((m) => m.id === selectedModelRef.current) ||
           MODEL_OPTIONS[0]
         ).label;
-        const cleanedText = stripMemoryControlTokens(text);
+        const cleanedText = stripDiaryControlTokens(
+          stripMemoryControlTokens(text)
+        );
         const bubbles = splitMultiBubbles(cleanedText);
         const list =
           bubbles.length > 0
@@ -1154,7 +1185,10 @@ export default function ChatApp({ onBackHome }) {
           onChunk: (_chunk, accumulated) => {
             rawReply = accumulated;
             const safePreview = accumulated
-              .replace(/\[\[(?:查日历|记日历事件|搜记忆|记记忆|改记忆|删记忆):[\s\S]*$/i, '')
+              .replace(
+                /\[\[(?:查日历|记日历事件|搜记忆|搜日记|记记忆|改记忆|删记忆):[\s\S]*$/i,
+                ''
+              )
               .replace(/\[\[\s*(?:记|改|删)记忆\|[\s\S]*$/i, '')
               .replace(/\[\[\s*分句\s*\]\][\s\S]*$/i, '')
               .trim();
@@ -1169,8 +1203,9 @@ export default function ChatApp({ onBackHome }) {
         const eventAdd = extractCalendarEventAdd(rawReply);
         const calQuery = extractCalendarQuery(rawReply);
         const memQuery = extractMemorySearchQuery(rawReply);
-        const cleanReply = stripMemoryControlTokens(
-          stripCalendarControlTokens(rawReply)
+        const diaryQuery = extractDiarySearchQuery(rawReply);
+        const cleanReply = stripDiaryControlTokens(
+          stripMemoryControlTokens(stripCalendarControlTokens(rawReply))
         );
 
         const feedbackParts = [];
@@ -1178,12 +1213,20 @@ export default function ChatApp({ onBackHome }) {
           feedbackParts.push(runCalendarEventAdd(eventAdd));
         }
         if (calQuery && rounds < 2) {
-          feedbackParts.push(runCalendarQuery(calQuery.dateSpec, calQuery.scopes));
+          feedbackParts.push(
+            runCalendarQuery(calQuery.dateSpec, calQuery.scopes)
+          );
         }
         if (memQuery && rounds < 2) {
           const memResult = await runBackendMemorySearch(memQuery);
           if (memResult) {
             feedbackParts.push(memResult);
+          }
+        }
+        if (diaryQuery && rounds < 2) {
+          const diaryResult = runLocalDiarySearch(diaryQuery, 4);
+          if (diaryResult) {
+            feedbackParts.push(diaryResult);
           }
         }
 
@@ -1203,7 +1246,9 @@ export default function ChatApp({ onBackHome }) {
           { role: 'assistant', content: rawReply },
           {
             role: 'user',
-            content: `${feedbackParts.join('\n\n')}\n\n（以上是你刚主动查阅/操作的结果，请自然接着回应我，不要再输出方括号指令。）`,
+            content: `${feedbackParts.join(
+              '\n\n'
+            )}\n\n（以上是你刚主动查阅/操作的结果，请自然接着回应我，不要再输出方括号指令。）`,
           },
         ];
       }
@@ -1886,7 +1931,6 @@ export default function ChatApp({ onBackHome }) {
               </button>
             </div>
 
-            {/* 按关键词检索 */}
             <div style={{ display: 'flex', gap: 6 }}>
               <input
                 value={memorySearchInput}
@@ -1942,7 +1986,6 @@ export default function ChatApp({ onBackHome }) {
               )}
             </div>
 
-            {/* 手动新增或编辑 */}
             <div
               style={{
                 display: 'flex',
@@ -2053,7 +2096,6 @@ export default function ChatApp({ onBackHome }) {
               <div style={{ fontSize: 12, color: '#be185d' }}>{memoryMsg}</div>
             )}
 
-            {/* 列表 */}
             <div
               style={{
                 display: 'flex',
