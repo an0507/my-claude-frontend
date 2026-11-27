@@ -9,6 +9,7 @@ import { readStorageJSON, writeStorageJSON } from '../utils/storage';
 export const DIARY_STORAGE_KEY =
   STORAGE_KEYS.DIARY_ENTRIES || 'claude_diary_entries_v1';
 export const DIARY_SUMMARIES_KEY = 'claude_diary_memory_summaries_v1';
+export const DIARY_UPDATED_EVENT = 'claude-diary-updated';
 const AUTO_RUN_ATTEMPT_KEY = 'claude_diary_auto_attempt_v1';
 
 export const DIARY_BATCH_SIZE = 5;
@@ -75,6 +76,12 @@ function formatCommentsForPrompt(comments) {
   return `\n日记下方留言：\n${lines.join('\n')}`;
 }
 
+export function notifyDiaryUpdated(detail = {}) {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(DIARY_UPDATED_EVENT, { detail }));
+  }
+}
+
 export function buildBoundedTranscript(
   messages,
   maxChars = MAX_DIARY_TRANSCRIPT_CHARS
@@ -123,6 +130,32 @@ export async function fetchDiaryStreamText(payload) {
   let buffer = '';
   let fullText = '';
 
+  const consumeChunk = (rawChunk) => {
+    const lines = rawChunk.split('\n');
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line.startsWith('data:')) continue;
+      const dataStr = line.slice(5).trim();
+      if (!dataStr) continue;
+      if (dataStr === '[DONE]') return true;
+
+      let parsed = null;
+      try {
+        parsed = JSON.parse(dataStr);
+      } catch {
+        continue;
+      }
+
+      if (parsed?.error) {
+        throw new Error(parsed.error);
+      }
+      if (typeof parsed?.text === 'string') {
+        fullText += parsed.text;
+      }
+    }
+    return false;
+  };
+
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -131,18 +164,15 @@ export async function fetchDiaryStreamText(payload) {
     buffer = parts.pop() || '';
 
     for (const part of parts) {
-      const line = part.trim();
-      if (!line.startsWith('data:')) continue;
-      const dataStr = line.slice(5).trim();
-      if (dataStr === '[DONE]') break;
-      const parsed = JSON.parse(dataStr);
-      if (parsed.error) {
-        throw new Error(parsed.error);
-      }
-      if (parsed.text) {
-        fullText += parsed.text;
+      const shouldStop = consumeChunk(part);
+      if (shouldStop) {
+        return fullText.trim();
       }
     }
+  }
+
+  if (buffer.trim()) {
+    consumeChunk(buffer);
   }
 
   return fullText.trim();
@@ -368,6 +398,11 @@ ${transcript}`,
         isAuto ? null : onStatusRef.current
       );
       writeStorageJSON(DIARY_SUMMARIES_KEY, syncedSummaries);
+      notifyDiaryUpdated({
+        targetDateKey: cycle.targetDateKey,
+        entries: mergedEntries,
+        summaries: syncedSummaries,
+      });
 
       const doneMsg = `已存入 ${formatReadableDate(
         cycle.targetDateKey
