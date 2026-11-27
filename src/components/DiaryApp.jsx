@@ -1,152 +1,29 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  BACKEND_URL,
-  DEFAULT_MODEL,
-  STORAGE_KEYS,
-} from '../constants/chatConfig';
+import { useCallback, useEffect, useState } from 'react';
 import { readStorageJSON, writeStorageJSON } from '../utils/storage';
+import {
+  DIARY_BATCH_SIZE,
+  DIARY_STORAGE_KEY,
+  DIARY_SUMMARIES_KEY,
+  getPreviousCycleWindow,
+  syncDiaryBatchSummaries,
+  useAutoDiaryScheduler,
+} from '../hooks/useAutoDiaryScheduler';
 import { BackLineIcon, DiaryLineIcon } from './LineIcons';
-
-const DIARY_STORAGE_KEY =
-  STORAGE_KEYS.DIARY_ENTRIES || 'claude_diary_entries_v1';
-const DIARY_SUMMARIES_KEY = 'claude_diary_memory_summaries_v1';
-const AUTO_RUN_ATTEMPT_KEY = 'claude_diary_auto_attempt_v1';
-const BATCH_SIZE = 5;
-const MAX_DIARY_MESSAGES = 150;
-const MAX_DIARY_TRANSCRIPT_CHARS = 20000;
-const DIARY_MAX_TOKENS = 1500;
-const SUMMARY_MAX_TOKENS = 1000;
 
 function pad2(n) {
   return String(n).padStart(2, '0');
 }
 
-function formatDateKey(dateObj) {
-  return `${dateObj.getFullYear()}-${pad2(dateObj.getMonth() + 1)}-${pad2(
-    dateObj.getDate()
-  )}`;
-}
-
 function formatNowStamp(now = new Date()) {
-  return `${formatDateKey(now)} ${pad2(now.getHours())}:${pad2(
-    now.getMinutes()
-  )}`;
+  return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(
+    now.getDate()
+  )} ${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
 }
 
 function formatReadableDate(dateKey) {
   const parts = String(dateKey || '').split('-');
   if (parts.length !== 3) return dateKey;
   return `${Number(parts[1])}月${Number(parts[2])}日`;
-}
-
-function getPreviousCycleWindow(now = new Date()) {
-  const todayFourAM = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate(),
-    4,
-    0,
-    0,
-    0
-  );
-  const endAt =
-    now >= todayFourAM
-      ? todayFourAM
-      : new Date(todayFourAM.getTime() - 24 * 60 * 60 * 1000);
-  const startAt = new Date(endAt.getTime() - 24 * 60 * 60 * 1000);
-  const targetDateKey = formatDateKey(startAt);
-
-  return {
-    targetDateKey,
-    startAt,
-    endAt,
-    isAfterTodayFourAM: now >= todayFourAM,
-    windowLabel: `${formatDateKey(startAt)} 04:00 ～ ${formatDateKey(endAt)} 04:00`,
-  };
-}
-
-function sortChronological(list) {
-  return [...(Array.isArray(list) ? list : [])].sort((a, b) =>
-    String(a.date || '').localeCompare(String(b.date || ''))
-  );
-}
-
-function formatCommentsForPrompt(comments) {
-  if (!Array.isArray(comments) || comments.length === 0) return '';
-  const lines = comments.map(
-    (c) => `  - [${c.time || ''}] 晓菲：${c.text || ''}`
-  );
-  return `\n日记下方留言：\n${lines.join('\n')}`;
-}
-
-function buildBoundedTranscript(messages, maxChars = MAX_DIARY_TRANSCRIPT_CHARS) {
-  const picked = [];
-  let totalChars = 0;
-
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const m = messages[i];
-    const speaker = m.role === 'user' ? '我' : '克劳德';
-    const rawContent = String(m.content || '').trim();
-    if (!rawContent) continue;
-
-    const line = `${speaker}：${rawContent}`;
-    const cost = line.length + (picked.length > 0 ? 1 : 0);
-
-    if (totalChars + cost > maxChars) {
-      if (picked.length === 0) {
-        picked.push(
-          `${speaker}：${rawContent.slice(-Math.max(100, maxChars - 10))}`
-        );
-      }
-      break;
-    }
-
-    picked.push(line);
-    totalChars += cost;
-  }
-
-  return picked.reverse().join('\n');
-}
-
-async function fetchStreamText(payload) {
-  const resp = await fetch(`${BACKEND_URL}/api/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-
-  if (!resp.ok || !resp.body) {
-    throw new Error('网络响应异常');
-  }
-
-  const reader = resp.body.getReader();
-  const decoder = new TextDecoder('utf-8');
-  let buffer = '';
-  let fullText = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const parts = buffer.split('\n\n');
-    buffer = parts.pop() || '';
-
-    for (const part of parts) {
-      const line = part.trim();
-      if (!line.startsWith('data:')) continue;
-      const dataStr = line.slice(5).trim();
-      if (dataStr === '[DONE]') break;
-      const parsed = JSON.parse(dataStr);
-      if (parsed.error) {
-        throw new Error(parsed.error);
-      }
-      if (parsed.text) {
-        fullText += parsed.text;
-      }
-    }
-  }
-
-  return fullText.trim();
 }
 
 export default function DiaryApp({ onBackHome }) {
@@ -164,15 +41,6 @@ export default function DiaryApp({ onBackHome }) {
   const [statusMsg, setStatusMsg] = useState('');
   const [commentDraft, setCommentDraft] = useState('');
 
-  const busyRef = useRef(false);
-  busyRef.current = generating;
-
-  const entriesRef = useRef(entries);
-  entriesRef.current = entries;
-
-  const summariesRef = useRef(summaries);
-  summariesRef.current = summaries;
-
   useEffect(() => {
     writeStorageJSON(DIARY_STORAGE_KEY, entries);
   }, [entries]);
@@ -185,296 +53,37 @@ export default function DiaryApp({ onBackHome }) {
     setCommentDraft('');
   }, [selectedDate]);
 
-  const activeEntry =
-    entries.find((item) => item.date === selectedDate) || entries[0] || null;
-
-  const syncBatchSummaries = useCallback(
-    async (allEntries, currentSummaries, modelToUse) => {
-      const chrono = sortChronological(allEntries);
-      const completedBatchCount = Math.floor(chrono.length / BATCH_SIZE);
-
-      const validSummaries = (
-        Array.isArray(currentSummaries) ? currentSummaries : []
-      )
-        .filter(
-          (s) =>
-            typeof s.batchIndex === 'number' &&
-            s.batchIndex <= completedBatchCount
-        )
-        .sort((a, b) => a.batchIndex - b.batchIndex);
-
-      if (completedBatchCount === 0) {
-        return [];
-      }
-
-      let updatedSummaries = [...validSummaries];
-
-      for (let batchIdx = 1; batchIdx <= completedBatchCount; batchIdx += 1) {
-        const start = (batchIdx - 1) * BATCH_SIZE;
-        const batchSlice = chrono.slice(start, start + BATCH_SIZE);
-        const startDate = batchSlice[0]?.date || '';
-        const endDate = batchSlice[batchSlice.length - 1]?.date || '';
-        const rangeLabel = `第${batchIdx}批（${startDate} ～ ${endDate}）`;
-
-        const exists = updatedSummaries.some(
-          (item) =>
-            item.batchIndex === batchIdx &&
-            item.startDate === startDate &&
-            item.endDate === endDate
-        );
-        if (exists) continue;
-
-        setStatusMsg(
-          `日记已满 ${batchIdx * BATCH_SIZE} 篇，正在生成${rangeLabel}摘要…`
-        );
-
-        const batchText = batchSlice
-          .map(
-            (d, idx) =>
-              `第${start + idx + 1}篇（${d.date}｜${d.title || '无标题'}）：\n${
-                d.content || ''
-              }${formatCommentsForPrompt(d.comments)}`
-          )
-          .join('\n\n');
-
-        const summaryText = await fetchStreamText({
-          messages: [
-            {
-              role: 'user',
-              content: `请将下面这 ${BATCH_SIZE} 篇日记合并概括成 1 篇精简摘要（控制在 150~250 字左右）。
-要求：保留核心事件、情绪变化、重要约定和人物/日常细节，用客观简洁的中文连贯写出，不要分点编号，也不要加“摘要：”前缀。
-
-${batchText}`,
-            },
-          ],
-          model: modelToUse,
-          maxTokens: SUMMARY_MAX_TOKENS,
-        });
-
-        if (summaryText) {
-          const nextItem = {
-            batchIndex: batchIdx,
-            startDate,
-            endDate,
-            rangeLabel,
-            summary: summaryText,
-            updatedAt: new Date().toISOString(),
-          };
-          updatedSummaries = [
-            ...updatedSummaries.filter((item) => item.batchIndex !== batchIdx),
-            nextItem,
-          ].sort((a, b) => a.batchIndex - b.batchIndex);
-        }
-      }
-
-      return updatedSummaries;
-    },
-    []
-  );
-
-  const runDiaryGeneration = useCallback(
-    async ({ isAuto = false } = {}) => {
-      if (busyRef.current) return;
-
-      const now = new Date();
-      const cycle = getPreviousCycleWindow(now);
-
-      const allMessages = readStorageJSON(STORAGE_KEYS.MESSAGES, []);
-      if (!Array.isArray(allMessages) || allMessages.length === 0) {
-        if (!isAuto) {
-          setStatusMsg('还没有聊天记录，先去「私聊」里聊几句吧。');
-        }
-        return;
-      }
-
-      const hasTimestamps = allMessages.some(
-        (m) => typeof m?.timestamp === 'number'
-      );
-      let scopedMessages = allMessages;
-
-      if (hasTimestamps) {
-        scopedMessages = allMessages.filter(
-          (m) =>
-            typeof m?.timestamp === 'number' &&
-            m.timestamp >= cycle.startAt.getTime() &&
-            m.timestamp < cycle.endAt.getTime()
-        );
-      }
-
-      if (isAuto && scopedMessages.length === 0) {
-        return;
-      }
-
-      scopedMessages =
-        scopedMessages.length === 0
-          ? allMessages.slice(-MAX_DIARY_MESSAGES)
-          : scopedMessages.slice(-MAX_DIARY_MESSAGES);
-
-      const transcript = buildBoundedTranscript(
-        scopedMessages,
-        MAX_DIARY_TRANSCRIPT_CHARS
-      );
-      if (!transcript) return;
-
-      const savedModel = readStorageJSON(STORAGE_KEYS.SELECTED_MODEL, null);
-      const modelToUse =
-        typeof savedModel === 'string' && savedModel ? savedModel : DEFAULT_MODEL;
-
-      if (isAuto) {
-        writeStorageJSON(AUTO_RUN_ATTEMPT_KEY, {
-          targetDateKey: cycle.targetDateKey,
-          attemptedAt: Date.now(),
-        });
-      }
-
-      busyRef.current = true;
-      setGenerating(true);
-      setStatusMsg(
-        `${isAuto ? '已过 04:00，自动' : '正在'}撰写 ${formatReadableDate(
-          cycle.targetDateKey
-        )}（${cycle.windowLabel}）的日记…`
-      );
-
-      try {
-        const trimmed = await fetchStreamText({
-          messages: [
-            {
-              role: 'user',
-              content: `日记归属日期是 ${cycle.targetDateKey}，总结的时间段是 ${cycle.windowLabel}。请你以“克劳德”的身份，根据下面我和你的聊天记录，写一篇温柔、自然、有生活感的日记。
-要求：
-1. 第一行写一个简短的日记标题（不要加“标题：”前缀）。
-2. 空一行后写日记正文，用第一人称“我”指代克劳德，用“你”指代聊天对象，总结这段时间聊到的内容、情绪和印象深刻的小细节。
-3. 控制在 180~350 字左右，不要列冰冷的要点清单。
-
-聊天记录：
-${transcript}`,
-            },
-          ],
-          model: modelToUse,
-          maxTokens: DIARY_MAX_TOKENS,
-        });
-
-        if (!trimmed) {
-          throw new Error('克劳德这次没有写出日记内容');
-        }
-
-        const lines = trimmed
-          .split('\n')
-          .map((l) => l.trim())
-          .filter(Boolean);
-
-        const title =
-          lines[0]?.replace(/^#+\s*/, '').slice(0, 36) ||
-          `${formatReadableDate(cycle.targetDateKey)}的聊天日记`;
-        const content =
-          lines.length > 1 ? lines.slice(1).join('\n\n').trim() : trimmed;
-
-        const currentEntries = entriesRef.current;
-        const currentSummaries = summariesRef.current;
-        const existingSameDay = currentEntries.find(
-          (item) => item.date === cycle.targetDateKey
-        );
-
-        const newEntry = {
-          date: cycle.targetDateKey,
-          windowLabel: cycle.windowLabel,
-          title,
-          content,
-          comments: Array.isArray(existingSameDay?.comments)
-            ? existingSameDay.comments
-            : [],
-          updatedAt: new Date().toISOString(),
-        };
-
-        const mergedEntries = [
-          newEntry,
-          ...currentEntries.filter((item) => item.date !== cycle.targetDateKey),
-        ].sort((a, b) => b.date.localeCompare(a.date));
-
-        setEntries(mergedEntries);
-        setSelectedDate(cycle.targetDateKey);
-
-        const syncedSummaries = await syncBatchSummaries(
-          mergedEntries,
-          currentSummaries,
-          modelToUse
-        );
-        setSummaries(syncedSummaries);
-
-        setStatusMsg(
-          `${isAuto ? '自动' : '已'}存入 ${formatReadableDate(
-            cycle.targetDateKey
-          )} 的日记（当前共 ${mergedEntries.length} 篇，已生成 ${
-            syncedSummaries.length
-          } 篇摘要）`
-        );
-      } catch (err) {
-        setStatusMsg(err?.message || '生成失败，请稍后再试');
-      } finally {
-        busyRef.current = false;
+  const { generateForCycle } = useAutoDiaryScheduler({
+    onStatus: (msg) => {
+      setStatusMsg(msg);
+      if (msg.includes('正在撰写') || msg.includes('正在生成')) {
+        setGenerating(true);
+      } else {
         setGenerating(false);
       }
     },
-    [syncBatchSummaries]
-  );
-
-  const checkAndTriggerAutoDiary = useCallback(() => {
-    if (busyRef.current) return;
-    if (
-      typeof document !== 'undefined' &&
-      document.visibilityState === 'hidden'
-    ) {
-      return;
-    }
-
-    const now = new Date();
-    const cycle = getPreviousCycleWindow(now);
-    if (!cycle.isAfterTodayFourAM) return;
-
-    const alreadyHasEntry = entriesRef.current.some(
-      (item) => item.date === cycle.targetDateKey
-    );
-    if (alreadyHasEntry) return;
-
-    const lastAttempt = readStorageJSON(AUTO_RUN_ATTEMPT_KEY, null);
-    if (
-      lastAttempt &&
-      lastAttempt.targetDateKey === cycle.targetDateKey &&
-      typeof lastAttempt.attemptedAt === 'number' &&
-      now.getTime() - lastAttempt.attemptedAt < 10 * 60 * 1000
-    ) {
-      return;
-    }
-
-    runDiaryGeneration({ isAuto: true });
-  }, [runDiaryGeneration]);
-
-  useEffect(() => {
-    const initialTimer = setTimeout(() => {
-      checkAndTriggerAutoDiary();
-    }, 500);
-
-    const intervalId = setInterval(() => {
-      checkAndTriggerAutoDiary();
-    }, 60 * 1000);
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        checkAndTriggerAutoDiary();
+    onDiaryGenerated: ({
+      targetDateKey,
+      entries: nextEntries,
+      summaries: nextSummaries,
+    }) => {
+      setEntries(nextEntries);
+      setSummaries(nextSummaries);
+      if (targetDateKey) {
+        setSelectedDate(targetDateKey);
       }
-    };
+      setGenerating(false);
+    },
+  });
 
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => {
-      clearTimeout(initialTimer);
-      clearInterval(intervalId);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, [checkAndTriggerAutoDiary]);
+  const handleGenerateDiary = useCallback(async () => {
+    setGenerating(true);
+    await generateForCycle({ isAuto: false });
+    setGenerating(false);
+  }, [generateForCycle]);
 
-  const handleGenerateDiary = useCallback(() => {
-    runDiaryGeneration({ isAuto: false });
-  }, [runDiaryGeneration]);
+  const activeEntry =
+    entries.find((item) => item.date === selectedDate) || entries[0] || null;
 
   function handleAddComment(e) {
     e.preventDefault();
@@ -517,9 +126,9 @@ ${transcript}`,
     setStatusMsg('已删除该条留言');
   }
 
-  function handleDeleteEntry(dateToDelete) {
+  async function handleDeleteEntry(dateToDelete) {
     const nextEntries = entries.filter((item) => item.date !== dateToDelete);
-    const completedBatchCount = Math.floor(nextEntries.length / BATCH_SIZE);
+    const completedBatchCount = Math.floor(nextEntries.length / DIARY_BATCH_SIZE);
     const nextSummaries = summaries
       .filter(
         (s) =>
@@ -530,12 +139,25 @@ ${transcript}`,
 
     setEntries(nextEntries);
     setSummaries(nextSummaries);
+    writeStorageJSON(DIARY_STORAGE_KEY, nextEntries);
+    writeStorageJSON(DIARY_SUMMARIES_KEY, nextSummaries);
+
     if (selectedDate === dateToDelete) {
       setSelectedDate(
         nextEntries[0]?.date || getPreviousCycleWindow().targetDateKey
       );
     }
     setStatusMsg('已删除该篇日记');
+
+    if (completedBatchCount > 0 && nextSummaries.length < completedBatchCount) {
+      const rebuilt = await syncDiaryBatchSummaries(
+        nextEntries,
+        nextSummaries,
+        undefined,
+        setStatusMsg
+      );
+      setSummaries(rebuilt);
+    }
   }
 
   const previewCycle = getPreviousCycleWindow();
@@ -628,7 +250,7 @@ ${transcript}`,
           borderBottom: '1px solid #fce4ec',
         }}
       >
-        每满 {BATCH_SIZE} 篇生成 1 篇摘要（当前 {entries.length} 篇日记 /{' '}
+        每满 {DIARY_BATCH_SIZE} 篇生成 1 篇摘要（当前 {entries.length} 篇日记 /{' '}
         {summaries.length} 篇摘要）
       </div>
 
@@ -748,7 +370,6 @@ ${transcript}`,
               {activeEntry.content}
             </div>
 
-            {/* 日记下方留言区 */}
             <div
               style={{
                 marginTop: 16,
@@ -890,7 +511,7 @@ ${transcript}`,
             </div>
             <div style={{ fontSize: 13, lineHeight: 1.6 }}>
               按 04:00 周期（当前周期：{previewCycle.windowLabel}）记录聊天内容；每满{' '}
-              {BATCH_SIZE} 篇会自动生成 1 篇摘要。
+              {DIARY_BATCH_SIZE} 篇会自动生成 1 篇摘要。
             </div>
           </div>
         )}
