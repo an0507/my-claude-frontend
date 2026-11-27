@@ -32,11 +32,69 @@ const DELETED_MEMORIES_KEY =
   STORAGE_KEYS.DELETED_MEMORIES || 'claude_deleted_memories_v1';
 
 const MAX_WINDOW_HISTORY_MESSAGES = 200;
+const MAX_IMAGE_DIMENSION = 1280;
+const IMAGE_JPEG_QUALITY = 0.8;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function toSafeArray(val) {
   return Array.isArray(val) ? val : [];
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('读取图片失败'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImageElement(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('图片解码失败'));
+    img.src = src;
+  });
+}
+
+// 压缩图片并转为 base64，控制体积与视觉 token 消耗
+async function compressImageFile(file) {
+  const rawDataUrl = await readFileAsDataUrl(file);
+  const img = await loadImageElement(rawDataUrl);
+
+  let width = img.naturalWidth || img.width || 1;
+  let height = img.naturalHeight || img.height || 1;
+  const maxSide = Math.max(width, height);
+
+  if (maxSide > MAX_IMAGE_DIMENSION) {
+    const scale = MAX_IMAGE_DIMENSION / maxSide;
+    width = Math.max(1, Math.round(width * scale));
+    height = Math.max(1, Math.round(height * scale));
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    throw new Error('无法创建画布压缩图片');
+  }
+  ctx.drawImage(img, 0, 0, width, height);
+
+  const mimeType = 'image/jpeg';
+  const compressedDataUrl = canvas.toDataURL(mimeType, IMAGE_JPEG_QUALITY);
+  const commaIdx = compressedDataUrl.indexOf(',');
+  const base64 =
+    commaIdx >= 0 ? compressedDataUrl.slice(commaIdx + 1) : compressedDataUrl;
+
+  return {
+    base64,
+    mediaType: mimeType,
+    previewUrl: compressedDataUrl,
+    name: file.name || 'image.jpg',
+  };
 }
 
 function getCycleStartTimestamp(nowDate = new Date()) {
@@ -101,7 +159,11 @@ function buildDailyDatedText(rawMessages = []) {
   let currentLines = [];
 
   for (const m of list) {
-    if (!m || typeof m.content !== 'string' || !m.content.trim()) continue;
+    const textPart = typeof m?.content === 'string' ? m.content.trim() : '';
+    const imgPart = m?.image?.base64 || m?.image?.previewUrl ? '[图片]' : '';
+    const combined = [textPart, imgPart].filter(Boolean).join(' ');
+    if (!m || !combined) continue;
+
     const sender = m.role === 'user' ? '安安' : '顾青';
     const dayLabel = formatMonthDayOnly(m);
 
@@ -117,7 +179,7 @@ function buildDailyDatedText(rawMessages = []) {
       currentLines = [];
     }
 
-    currentLines.push(`${sender}：${m.content.trim()}`);
+    currentLines.push(`${sender}：${combined}`);
   }
 
   if (currentLines.length > 0) {
@@ -242,7 +304,6 @@ function splitMultiBubbles(text = '') {
     .filter(Boolean);
 }
 
-// 解析并清理克劳德主动发出的 [[搜历史: 关键词或日期]]
 function extractHistorySearchQuery(rawText = '') {
   const match = String(rawText || '').match(
     /\[\[\s*搜历史\s*:\s*([\s\S]*?)\s*\]\]/i
@@ -257,7 +318,6 @@ function stripHistoryControlTokens(rawText = '') {
     .trim();
 }
 
-// 解析并清理克劳德主动发出的 [[搜记忆: 关键词]] 与编辑标记
 function extractMemorySearchQuery(rawText = '') {
   const match = String(rawText || '').match(
     /\[\[\s*搜记忆\s*:\s*([\s\S]*?)\s*\]\]/i
@@ -273,7 +333,6 @@ function stripMemoryControlTokens(rawText = '') {
     .trim();
 }
 
-// 解析并清理克劳德主动发出的 [[搜日记: 关键词或日期]]
 function extractDiarySearchQuery(rawText = '') {
   const match = String(rawText || '').match(
     /\[\[\s*搜日记\s*:\s*([\s\S]*?)\s*\]\]/i
@@ -288,7 +347,6 @@ function stripDiaryControlTokens(rawText = '') {
     .trim();
 }
 
-// 按需搜索日记（平时不每轮塞进 system，只有克劳德主动 [[搜日记:...]] 时才检索带入）
 function runLocalDiarySearch(queryStr = '', limit = 4) {
   const diaryList = readStorageJSON(DIARY_STORAGE_KEY, []);
   const allDiaries = Array.isArray(diaryList) ? diaryList : [];
@@ -404,7 +462,6 @@ function formatMessageTime(ts, now = new Date()) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hhmm}`;
 }
 
-// 稳定 system 规则：日记与早期聊天记录均改为按需检索，控制缓存体积与命中率
 function buildStableSystemPrompt() {
   return `你正在一部名为「克劳德小手机」的网页手机应用里和用户聊天。你不仅能看到这部小手机里的全部内容，而且「克劳德日记」就是你自己的日记本——里面的每一篇都是你亲手写下、用来记录和用户相处与日常心事的。
 
@@ -413,6 +470,7 @@ function buildStableSystemPrompt() {
 - 「克劳德日记」是你的专属日记本：每天凌晨 04:00，你会复盘并总结前一天 04:00 至当天 04:00 之间你们的聊天，用第一人称“我”写下自己的感受与记录；如果用户点了“立即生成日记”，也是请你现在就动笔写一篇。
 - 日记内容平时不每轮自动塞进对话以节省开销；当你想回顾某天日记、日记里的心事或下方留言时，请输出单独一行控制指令：
   [[搜日记: 关键词或日期]]（例如 [[搜日记: 11.24]] 或 [[搜日记: 最近]] 或 [[搜日记: 生理期]]）
+- 当用户发来图片时，请结合画面细节、氛围和文字自然回应，就像真人伴侣一起看照片/截图聊天一样。
 - 请把写日记当成你自己的习惯和心意，而不是冷冰冰的系统任务或旁观者的汇报。聊天时遇到值得记住的细节、情绪或约定，你可以自然地有“我之后会把这些写进日记里”的意识，但不要刻意把“我要写日记”挂在嘴边显得做作。
 
 ${CALENDAR_SYSTEM_RULE}
@@ -421,7 +479,6 @@ ${CALENDAR_SYSTEM_RULE}
 - 如果你想像真人聊天那样连发多条短消息，可以用 [[分句]] 把不同气泡隔开（一般 2～4 条即可，保持自然克制，不要过度刷屏）；如果只想回一条，直接正常说话即可，不要加 [[分句]]。`;
 }
 
-// 轻量动态上下文（放在最后一条 user 消息末尾）
 function buildDynamicTurnContext({
   currentMessages = [],
   deletedMemories = [],
@@ -573,6 +630,8 @@ export default function ChatApp({ onBackHome }) {
   const [lengthMenuOpen, setLengthMenuOpen] = useState(false);
   const [managerOpen, setManagerOpen] = useState(false);
   const [input, setInput] = useState('');
+  const [draftImage, setDraftImage] = useState(null);
+  const [imageProcessing, setImageProcessing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [backupNotice, setBackupNotice] = useState('');
 
@@ -601,6 +660,7 @@ export default function ChatApp({ onBackHome }) {
   const safeMessages = toSafeArray(messages);
 
   const bottomRef = useRef(null);
+  const fileInputRef = useRef(null);
   const modelMenuRef = useRef(null);
   const lengthMenuRef = useRef(null);
   const lastAutoBackedCountRef = useRef(0);
@@ -625,6 +685,28 @@ export default function ChatApp({ onBackHome }) {
   currentLengthObjRef.current = currentLengthObj;
   backupSnapshotRef.current = backupSnapshot;
   loadingRef.current = loading;
+
+  async function handleSelectImageFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || loading) return;
+
+    if (!file.type || !file.type.startsWith('image/')) {
+      setBackupNotice('请选择图片文件');
+      return;
+    }
+
+    setImageProcessing(true);
+    setBackupNotice('');
+    try {
+      const compressed = await compressImageFile(file);
+      setDraftImage(compressed);
+    } catch (err) {
+      setBackupNotice(err?.message || '图片处理失败，请换一张试试');
+    } finally {
+      setImageProcessing(false);
+    }
+  }
 
   async function fetchLoveQuotes() {
     setQuotesLoading(true);
@@ -1128,7 +1210,10 @@ export default function ChatApp({ onBackHome }) {
   }
 
   async function sendMessage() {
-    if (!input.trim() || loading) return;
+    const cleanText = input.trim();
+    const pendingImage = draftImage;
+    if ((!cleanText && !pendingImage) || loading || imageProcessing) return;
+
     setMenuOpen(false);
     setLengthMenuOpen(false);
     setSelectMode(false);
@@ -1139,7 +1224,16 @@ export default function ChatApp({ onBackHome }) {
     const nowDate = new Date(nowTs);
     const userMessage = {
       role: 'user',
-      content: input.trim(),
+      content: cleanText,
+      ...(pendingImage
+        ? {
+            image: {
+              base64: pendingImage.base64,
+              mediaType: pendingImage.mediaType,
+              previewUrl: pendingImage.previewUrl,
+            },
+          }
+        : {}),
       timestamp: nowTs,
     };
     const nextMessages = [...safeMessages, userMessage];
@@ -1162,19 +1256,41 @@ export default function ChatApp({ onBackHome }) {
     );
 
     const baseApiMessages = filteredApiMessages.map(
-      ({ role, content, timestamp }, idx) => {
+      ({ role, content, image, timestamp }, idx) => {
+        const isLastMsg = idx === filteredApiMessages.length - 1;
         const timeLabel = formatMessageTime(timestamp, nowDate);
         const prefix = role === 'user' ? `[${timeLabel}] ` : '';
-        const baseText = `${prefix}${content || ''}`;
-        if (role === 'user' && idx === filteredApiMessages.length - 1) {
-          return {
-            role,
-            content: `${baseText}\n\n${dynamicContext}`,
-          };
+        const textBody =
+          content && content.trim()
+            ? content.trim()
+            : image?.base64
+            ? '看看这张图片'
+            : '';
+        let composedText = `${prefix}${textBody}`.trim();
+
+        if (!isLastMsg && role === 'user' && image?.base64) {
+          composedText = composedText
+            ? `${composedText} [已发图片]`
+            : `${prefix}[已发图片]`;
         }
+
+        if (role === 'user' && isLastMsg) {
+          composedText = `${composedText}\n\n${dynamicContext}`;
+          if (image?.base64) {
+            return {
+              role,
+              content: composedText,
+              image: {
+                base64: image.base64,
+                mediaType: image.mediaType || 'image/jpeg',
+              },
+            };
+          }
+        }
+
         return {
           role,
-          content: baseText,
+          content: composedText,
         };
       }
     );
@@ -1190,6 +1306,7 @@ export default function ChatApp({ onBackHome }) {
       },
     ]);
     setInput('');
+    setDraftImage(null);
     setLoading(true);
 
     let activeChannel = '';
@@ -1323,6 +1440,8 @@ export default function ChatApp({ onBackHome }) {
   }
 
   const isDisabledAction = loading || safeMessages.length === 0;
+  const canSend =
+    !loading && !imageProcessing && (Boolean(input.trim()) || Boolean(draftImage));
 
   return (
     <div
@@ -1609,6 +1728,7 @@ export default function ChatApp({ onBackHome }) {
           safeMessages.map((m, i) => {
             const isUser = m.role === 'user';
             const isSelected = selectedIndices.includes(i);
+            const imgSrc = m?.image?.previewUrl || '';
             return (
               <div
                 key={i}
@@ -1667,6 +1787,20 @@ export default function ChatApp({ onBackHome }) {
                       {isSelected ? '☑' : '☐'}
                     </span>
                   )}
+                  {imgSrc && (
+                    <img
+                      src={imgSrc}
+                      alt="发送的图片"
+                      style={{
+                        display: 'block',
+                        maxWidth: 220,
+                        maxHeight: 240,
+                        borderRadius: 10,
+                        marginBottom: m.content ? 8 : 0,
+                        objectFit: 'cover',
+                      }}
+                    />
+                  )}
                   {m.content ||
                     (m.role === 'assistant' && loading ? (
                       <span style={{ color: '#9a7b86', fontSize: 14 }}>
@@ -1707,10 +1841,83 @@ export default function ChatApp({ onBackHome }) {
           background: '#fff9fb',
         }}
       >
-        <div style={{ display: 'flex', gap: 10 }}>
+        {draftImage && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              padding: '8px 10px',
+              borderRadius: 12,
+              background: '#fff0f5',
+              border: '1px solid #f3c4d6',
+            }}
+          >
+            <img
+              src={draftImage.previewUrl}
+              alt="待发送图片预览"
+              style={{
+                width: 48,
+                height: 48,
+                borderRadius: 8,
+                objectFit: 'cover',
+                flexShrink: 0,
+              }}
+            />
+            <div style={{ flex: 1, fontSize: 12, color: '#6e4d59' }}>
+              已准备发送图片（已压缩，发送后顾青可以看到）
+            </div>
+            <button
+              type="button"
+              onClick={() => setDraftImage(null)}
+              disabled={loading}
+              style={{
+                padding: '4px 10px',
+                fontSize: 12,
+                borderRadius: 999,
+                border: '1px solid #f0cedb',
+                background: '#ffffff',
+                color: '#be185d',
+                cursor: loading ? 'not-allowed' : 'pointer',
+              }}
+            >
+              移除
+            </button>
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleSelectImageFile}
+            style={{ display: 'none' }}
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={loading || imageProcessing}
+            style={{
+              padding: '0 12px',
+              height: 40,
+              fontSize: 13,
+              fontWeight: 600,
+              borderRadius: 12,
+              border: '1px solid #f2cedb',
+              background: draftImage ? '#ffe4ee' : '#ffffff',
+              color: '#be185d',
+              cursor:
+                loading || imageProcessing ? 'not-allowed' : 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {imageProcessing ? '处理中' : '图片'}
+          </button>
           <input
             style={{
               flex: 1,
+              minWidth: 0,
               padding: '10px 14px',
               fontSize: 15,
               borderRadius: 12,
@@ -1722,20 +1929,21 @@ export default function ChatApp({ onBackHome }) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-            placeholder="输入消息…"
+            placeholder={draftImage ? '补充一句想说的话（可空）…' : '输入消息…'}
           />
           <button
             onClick={sendMessage}
-            disabled={loading || !input.trim()}
+            disabled={!canSend}
             style={{
               padding: '0 18px',
+              height: 40,
               fontSize: 14,
               fontWeight: 600,
               borderRadius: 12,
               border: 'none',
-              background: loading || !input.trim() ? '#f5c6d6' : '#e57399',
+              background: !canSend ? '#f5c6d6' : '#e57399',
               color: '#ffffff',
-              cursor: loading || !input.trim() ? 'not-allowed' : 'pointer',
+              cursor: !canSend ? 'not-allowed' : 'pointer',
               whiteSpace: 'nowrap',
             }}
           >
