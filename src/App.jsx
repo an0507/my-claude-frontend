@@ -3,9 +3,12 @@ import CalendarApp from './components/CalendarApp';
 import ChatApp from './components/ChatApp';
 import DiaryApp from './components/DiaryApp';
 import PhoneHome from './components/PhoneHome';
+import { useAutoDiaryScheduler } from './hooks/useAutoDiaryScheduler';
 
 export default function App() {
   const [activeApp, setActiveApp] = useState('home');
+
+  useAutoDiaryScheduler();
 
   const handleOpenApp = (nextApp) => {
     setActiveApp(nextApp);
